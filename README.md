@@ -10,29 +10,29 @@ including **firmware**, **software**, and **hardware** (electronics and mechanic
 
 ## 📂 Repository Structure
 
--   [docs/](https://docs/) - Project documentation
+-   [docs/](docs/) - Project documentation
     
--   [firmware/](https://firmware/) - Microcontroller source code
+-   [firmware/](firmware/) - Microcontroller source code
     
--   [software/](https://software/) - PC applications, scripts, and simulations
+-   [software/](software/) - PC applications, scripts, and simulations
     
--   [hardware/](https://hardware/) - Hardware design files
+-   [hardware/](hardware/) - Hardware design files
     
-    -   [electronics/](https://hardware/electronics/) - Electronic design files
+    -   [electronics/](hardware/electronics/) - Electronic design files
         
-        -   [kicad/](https://hardware/electronics/kicad/) - Schematics and PCB layouts (KiCad project files)
+        -   [kicad/](hardware/electronics/kicad/) - Schematics and PCB layouts (KiCad project files)
             
-        -   [bom/](https://hardware/electronics/bom/) - Bill of Materials
+        -   [bom/](hardware/electronics/bom/) - Bill of Materials
             
-    -   [mechanics/](https://hardware/mechanics/) - Mechanical models (CAD, STL, STEP, drawings)
+    -   [mechanics/](hardware/mechanics/) - Mechanical models (CAD, STL, STEP, drawings)
         
--   [tests/](https://tests/) - Integration tests (firmware + hardware + software)
+-   [tests/](tests/) - Integration tests (firmware + hardware + software)
     
--   [tools/](https://tools/) - Utility scripts and helper tools
+-   [tools/](tools/) - Utility scripts and helper tools
     
--   [LICENSE](https://LICENSE) - License file
+-   [LICENSE](LICENSE) - License file
     
--   [README.md](https://README.md) - This file
+-   [README.md](README.md) - This file
 
 ## 📌 Reference
 
