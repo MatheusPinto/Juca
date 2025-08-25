@@ -14,28 +14,30 @@ suporte para **robôs com tração diferencial** e **integração simplificada c
 Este repositório contém todos os recursos relacionados ao desenvolvimento do rover, 
 incluindo **firmware**, **software** e **hardware** (eletrônica e mecânica).
 
-Juca/
-│
-├── documentacao/           # Documentação do projeto
-│
-├── firmware/               # Código fonte para microcontrolador
-│
-├── software/               # Aplicações para PC, scripts e simulações
-│
-├── hardware/
-│   ├── eletronica/
-│   │   ├── kicad/         # Esquemas e layouts de PCB (arquivos do KiCad)
-│   │   └── lista-materiais/ # Lista de Materiais (BOM)
-│   │
-│   └── mecanica/          # Modelos mecânicos (CAD, STL, STEP, desenhos)
-│
-├── testes/                 # Testes de integração (firmware + hardware + software)
-│
-├── ferramentas/            # Scripts utilitários e ferramentas auxiliares
-│
-├── LICENCA
-└── README.md
-
+-   [docs/](docs/) - Documentação do projeto
+    
+-   [firmware/](firmware/) - Código fonte para microcontrolador
+    
+-   [software/](software/) - Aplicações para PC, scripts e simulações
+    
+-   [hardware/](hardware/) - Arquivos de design de hardware
+    
+    -   [electronics/](hardware/electronics/) - Arquivos de design eletrônico
+        
+        -   [kicad/](hardware/electronics/kicad/) - Esquemas e layouts de PCB (arquivos do projeto KiCad)
+            
+        -   [bom/](hardware/electronics/bom/) - Lista de Materiais (BOM)
+            
+    -   [mechanics/](hardware/mechanics/) - Modelos mecânicos (CAD, STL, STEP, desenhos)
+        
+-   [tests/](tests/) - Testes de integração (firmware + hardware + software)
+    
+-   [tools/](tools/) - Scripts utilitários e ferramentas auxiliares
+    
+-   [LICENSE](LICENSE) - Arquivo de licença
+    
+-   [README.md](README.md) - Este arquivo
+  
 ## 📌 Referência
 
 Para informações sobre a **motivação, objetivos de design e critérios de desenvolvimento** do robô, 
