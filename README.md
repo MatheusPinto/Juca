@@ -10,19 +10,29 @@ including **firmware**, **software**, and **hardware** (electronics and mechanic
 
 ## 📂 Repository Structure
 
-Juca/
-├── docs/                    # Project documentation
-├── firmware/                # Microcontroller source code
-├── software/                # PC applications, scripts, and simulations
-├── hardware/
-│   ├── electronics/
-│   │   ├── kicad/          # Schematics and PCB layouts (KiCad project files)
-│   │   └── bom/            # Bill of Materials
-│   └── mechanics/          # Mechanical models (CAD, STL, STEP, drawings)
-├── tests/                   # Integration tests (firmware + hardware + software)
-├── tools/                   # Utility scripts and helper tools
-├── LICENSE
-└── README.md
+-   [docs/](https://docs/) - Project documentation
+    
+-   [firmware/](https://firmware/) - Microcontroller source code
+    
+-   [software/](https://software/) - PC applications, scripts, and simulations
+    
+-   [hardware/](https://hardware/) - Hardware design files
+    
+    -   [electronics/](https://hardware/electronics/) - Electronic design files
+        
+        -   [kicad/](https://hardware/electronics/kicad/) - Schematics and PCB layouts (KiCad project files)
+            
+        -   [bom/](https://hardware/electronics/bom/) - Bill of Materials
+            
+    -   [mechanics/](https://hardware/mechanics/) - Mechanical models (CAD, STL, STEP, drawings)
+        
+-   [tests/](https://tests/) - Integration tests (firmware + hardware + software)
+    
+-   [tools/](https://tools/) - Utility scripts and helper tools
+    
+-   [LICENSE](https://LICENSE) - License file
+    
+-   [README.md](https://README.md) - This file
 
 ## 📌 Reference
 
