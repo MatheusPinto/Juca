@@ -3,35 +3,41 @@
 
 # Juca
 
-Juca is an embedded mobile robotics board designed specifically for education. Juca combines affordability, expandability, and robust functionality, making it suitable for classroom and competition environments. Key features include modular hardware akin to Arduino shields, support for differential drive robots, and seamless integration with educational programming platforms.
+Juca é uma placa de robótica móvel embarcada projetada especificamente para fins educacionais. 
+Juca combina **custo acessível**, **expansibilidade** e **funcionalidade robusta**, 
+tornando-a adequada tanto para ambientes de sala de aula quanto para competições. 
+Entre suas principais características estão o **hardware modular semelhante aos shields do Arduino**, 
+suporte para **robôs com tração diferencial** e **integração simplificada com plataformas educacionais de programação**.
 
-This repository contains all the resources related to the development of the rover, 
-including **firmware**, **software**, and **hardware** (electronics and mechanics). 
+## 📂 Estrutura do Repositório
 
-For information on the motivation, design objectives, and development criteria of the robot,  
-please refer to the article *“Juca: an embedded mobile robotics board for education”*,  
-published in the *16th Workshop on Robotics in Education (WRE 2025)*.
+Este repositório contém todos os recursos relacionados ao desenvolvimento do rover, 
+incluindo **firmware**, **software** e **hardware** (eletrônica e mecânica).
 
-## 📂 Repository Structure
-
-my-robot-project/
+Juca/
 │
-├── docs/ # Project documentation
+├── documentacao/           # Documentação do projeto
 │
-├── firmware/ # Microcontroller source code
+├── firmware/               # Código fonte para microcontrolador
 │
-├── software/ # PC applications, scripts, and simulations
+├── software/               # Aplicações para PC, scripts e simulações
 │
 ├── hardware/
-│ ├── electronics/
-│ │ ├── kicad/ # Schematics and PCB layouts (KiCad project files)
-│ │ └── bom/ # Bill of Materials
-│ │
-│ └── mechanics/ # Mechanical models (CAD, STL, STEP, drawings)
+│   ├── eletronica/
+│   │   ├── kicad/         # Esquemas e layouts de PCB (arquivos do KiCad)
+│   │   └── lista-materiais/ # Lista de Materiais (BOM)
+│   │
+│   └── mecanica/          # Modelos mecânicos (CAD, STL, STEP, desenhos)
 │
-├── tests/ # Integration tests (firmware + hardware + software)
+├── testes/                 # Testes de integração (firmware + hardware + software)
 │
-├── tools/ # Utility scripts and helper tools
+├── ferramentas/            # Scripts utilitários e ferramentas auxiliares
 │
-├── LICENSE
+├── LICENCA
 └── README.md
+
+## 📌 Referência
+
+Para informações sobre a **motivação, objetivos de design e critérios de desenvolvimento** do robô, 
+consulte o artigo *“Juca: an embedded mobile robotics board for education”*, 
+publicado no *16th Workshop on Robotics in Education (WRE 2025)*

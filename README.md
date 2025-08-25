@@ -12,22 +12,22 @@ including **firmware**, **software**, and **hardware** (electronics and mechanic
 
 Juca/
 │
-├── docs/ # Project documentation
+├── docs/                    # Project documentation
 │
-├── firmware/ # Microcontroller source code
+├── firmware/                # Microcontroller source code
 │
-├── software/ # PC applications, scripts, and simulations
+├── software/                # PC applications, scripts, and simulations
 │
 ├── hardware/
-│ ├── electronics/
-│ │ ├── kicad/ # Schematics and PCB layouts (KiCad project files)
-│ │ └── bom/ # Bill of Materials
-│ │
-│ └── mechanics/ # Mechanical models (CAD, STL, STEP, drawings)
+│   ├── electronics/
+│   │   ├── kicad/          # Schematics and PCB layouts (KiCad project files)
+│   │   └── bom/            # Bill of Materials
+│   │
+│   └── mechanics/          # Mechanical models (CAD, STL, STEP, drawings)
 │
-├── tests/ # Integration tests (firmware + hardware + software)
+├── tests/                   # Integration tests (firmware + hardware + software)
 │
-├── tools/ # Utility scripts and helper tools
+├── tools/                   # Utility scripts and helper tools
 │
 ├── LICENSE
 └── README.md
