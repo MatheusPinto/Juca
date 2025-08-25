@@ -11,24 +11,16 @@ including **firmware**, **software**, and **hardware** (electronics and mechanic
 ## 📂 Repository Structure
 
 Juca/
-│
 ├── docs/                    # Project documentation
-│
 ├── firmware/                # Microcontroller source code
-│
 ├── software/                # PC applications, scripts, and simulations
-│
 ├── hardware/
 │   ├── electronics/
 │   │   ├── kicad/          # Schematics and PCB layouts (KiCad project files)
 │   │   └── bom/            # Bill of Materials
-│   │
 │   └── mechanics/          # Mechanical models (CAD, STL, STEP, drawings)
-│
 ├── tests/                   # Integration tests (firmware + hardware + software)
-│
 ├── tools/                   # Utility scripts and helper tools
-│
 ├── LICENSE
 └── README.md
 
