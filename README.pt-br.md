@@ -8,9 +8,13 @@ Juca is an embedded mobile robotics board designed specifically for education. J
 This repository contains all the resources related to the development of the rover, 
 including **firmware**, **software**, and **hardware** (electronics and mechanics). 
 
+For information on the motivation, design objectives, and development criteria of the robot,  
+please refer to the article *“Juca: an embedded mobile robotics board for education”*,  
+published in the *16th Workshop on Robotics in Education (WRE 2025)*.
+
 ## 📂 Repository Structure
 
-Juca/
+my-robot-project/
 │
 ├── docs/ # Project documentation
 │
@@ -31,9 +35,3 @@ Juca/
 │
 ├── LICENSE
 └── README.md
-
-## 📌 Reference
-
-For information on the motivation, design objectives, and development criteria of the robot,  
-please refer to the article *“Juca: an embedded mobile robotics board for education”*,  
-published in the *16th Workshop on Robotics in Education (WRE 2025)*.

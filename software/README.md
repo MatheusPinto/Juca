@@ -1,0 +1,1 @@
+# Software-related artifacts
