@@ -1,0 +1,12 @@
+Snippet de código
+
+# Arquivos de backup e travas
+*.bak
+*.lck
+*-bak
+_autosave-*
+robo_2wd-backups/
+
+# Pastas de saída
+/plots/
+/gerbers/
