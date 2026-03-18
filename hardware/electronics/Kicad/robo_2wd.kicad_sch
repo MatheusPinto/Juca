@@ -13928,7 +13928,7 @@
 				)
 			)
 		)
-		(property "Value" "200k"
+		(property "Value" "82k"
 			(at 53.721 133.9596 90)
 			(effects
 				(font
@@ -17700,7 +17700,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "200k"
+		(property "Value" "82k"
 			(at 47.879 160.909 0)
 			(effects
 				(font
@@ -18707,7 +18707,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "200k"
+		(property "Value" "82k"
 			(at 47.498 206.375 0)
 			(effects
 				(font
@@ -22271,7 +22271,7 @@
 				)
 			)
 		)
-		(property "Value" "200k"
+		(property "Value" "82k"
 			(at 53.34 179.4256 90)
 			(effects
 				(font
