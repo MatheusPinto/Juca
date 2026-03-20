@@ -1,7 +1,10 @@
 [![en](https://img.shields.io/badge/lang-en-red.svg)](/README.md)
 [![pt-br](https://img.shields.io/badge/lang-pt--br-green.svg)](/README.pt-br.md)
 
+---
 ![Juca front|186](figs/juca_logo.png)
+
+---
 Juca is an embedded mobile robotics board designed specifically for education. Juca combines affordability, expandability, and robust functionality, making it suitable for classroom and competition environments. Key features include modular hardware akin to Arduino shields, support for differential drive robots, and seamless integration with educational programming platforms.
 
 This repository contains all the resources related to the development of the rover, 
