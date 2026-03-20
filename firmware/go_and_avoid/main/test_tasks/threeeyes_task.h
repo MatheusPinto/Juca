@@ -5,7 +5,7 @@
 #include "esp_private/esp_clk.h"
 #include "driver/mcpwm_cap.h"
 #include "driver/gpio.h"
-#include "treeeyes.h"
 #include <inttypes.h>
+#include "threeeyes.h"
 
-portTASK_FUNCTION(Treeeyes, args);
+portTASK_FUNCTION(Threeeyes, args);

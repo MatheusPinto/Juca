@@ -20,20 +20,20 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "wheel.h"
-#include "treeeyes_task.h"
+#include "threeeyes_task.h"
 #include "wheel_task.h"
 #include "imu_task.h"
 #include <inttypes.h>
 
-#define TREE_EYES_TASK
+#define THREE_EYES_TASK
 #define IMU_TASK
 #define WHEEL_CTRL_TASK
 
 void app_main(void)
 {
-#ifdef TREE_EYES_TASK
-    xTaskCreate(Treeeyes,
-                "treeeyes",
+#ifdef THREE_EYES_TASK
+    xTaskCreate(Threeeyes,
+                "threeeyes",
                 configMINIMAL_STACK_SIZE*3,
                 NULL,
                 5,

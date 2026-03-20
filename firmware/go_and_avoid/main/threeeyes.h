@@ -1,5 +1,5 @@
-#ifndef TREE_EYES_LIB
-#define  TREE_EYES_LIB
+#ifndef THREE_EYES_LIB
+#define  THREE_EYES_LIB
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/projdefs.h"
@@ -33,16 +33,16 @@ typedef struct {
     ultrasonic_value_t value;
 } ultrasonic_sensor_t;
 
-void TreeEyes_Init( void );
+void ThreeEyes_Init( void );
 
-void TreeEyes_TrigAndWait( TickType_t xTicksToWait );
+void ThreeEyes_TrigAndWait( TickType_t xTicksToWait );
 
-void TreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right);
+void ThreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right);
 
-void TreeEyes_DisableLeft(void);
+void ThreeEyes_DisableLeft(void);
 
-void TreeEyes_DisableMiddle(void);
+void ThreeEyes_DisableMiddle(void);
 
-void TreeEyes_DisableRight(void);
+void ThreeEyes_DisableRight(void);
 
-#endif // TREE_EYES_LIB
+#endif // THREE_EYES_LIB

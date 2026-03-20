@@ -163,7 +163,7 @@ Com base nas combinações dos pinos MOT_IN1, MOT_IN2, MOT_IN3 e MOT_IN4, pode-s
 
 <br>
 
-Além do acionamento dos motores, o módulo de driver de motores fornece a corrente dos motores por meio de dois pinos SENSE_A e SENSE_B. Essas correntes são aplicadas a resistores de *shunt* de 0,1 Ohm PTH do tipo filme de carbono de 2 Watts (no limiar de potência para os motores), por serem fáceis de serem achadas comercialmente no Brasil. Sabendo a resistência dos _shunts_ e medindo a tensão dos mesmos por meio de do ADC no SoC, aplica-se a Lei de Ohm e se obtém a corrente.. Posto isto, os valores de queda de tensão que surgem nesses resistores são muito pequenos, devendo ser necessário um circuito de amplificação (que será abordado posteriormente). 
+Além do acionamento dos motores, o módulo de driver de motores fornece a corrente dos motores por meio de dois pinos SENSE_A e SENSE_B. Essas correntes são aplicadas a resistores de *shunt* de 0,1 Ohm PTH do tipo filme de carbono de 2 Watts (no limiar de potência para os motores), por serem fáceis de serem achadas comercialmente no Brasil. Sabendo a resistência dos *shunts* e medindo a tensão dos mesmos por meio de do ADC no SoC, aplica-se a Lei de Ohm e se obtém a corrente.. Posto isto, os valores de queda de tensão que surgem nesses resistores são muito pequenos, devendo ser necessário um circuito de amplificação (que será abordado posteriormente). 
 
 O módulo também possui uma interface para entrada de encoders de quadratura. Essa parte será abordada mais adiante também, pois também serão apresentados os encoders utilizados. 
 
@@ -184,10 +184,9 @@ Para monitorar a carga dos motores e detectar obstáculos ou travamentos (stall)
 <br><br>
 
 O ganho dos amplificadores foi determinado de tal forma que a corrente máxima de torque dos motores que foram utilizados (1,1 A) fosse próxima dos 3 V, já que o ADC do ESP32-S3 possui fundo de escala de 3V3. Como o LM324 não é rail-to-rail, ele satura cerca de 1.5V abaixo do VCC​, com 5V de alimentação, a saída máxima real será de aproximadamente **3.5V**. o suficiente para a aplicação. Para tanto, o cálculo usando o amplificador não inversor foi:
-<br>
-<div align="center">
-  G=1+Rin​.Rfeedback​​=1+3k.82k​≈28,33.
-</div>
+
+$$G=1+R_{in}​.R_{feedback​}​=1+3k.82k​≈28,33.$$
+
 <br>
 Abaixo está uma tabela ilustrativa com exemplos de tensão e leitura do ADC.
 <br>
@@ -253,16 +252,133 @@ Para saber como o ESP32-S3 trabalha com os pulsos de encoders acesse este conte�
 ---
 ## Sensores de linha IR
 
+O módulo de sensores de linha IR não está presente diretamente na placa, devido às demandas de restrições geométricas necessárias para acomoda-la (geralmente longe da placa e em posições diversas de acordo com a necessidade do robô). Dessa forma, o Juca oferece uma interface para 5 sensores IR ([Figura 15](#ir_line_sch)).
+
+<br>
+
+<div id="ir_line_sch" align="center">
+  <img src="figs/ir_line_sch.png" alt="Jumpers para interface com sensores de linha IR." width="300">
+  <br>
+  <i>Figura 14: Jumpers para interface com sensores de linha IR.</i>
+</div>
+
+<br>
+
+Inicialmente utilizamos o módulo apresentado na [Figura 15](#ir_module). 
+
+<br>
+
+<div id="ir_module" align="center">
+  <img src="figs/ir_module.png" alt="Módulo IR utilizado no Juca." width="400">
+  <br>
+  <i>Figura 15: Módulo IR utilizado no Juca.</i>
+</div>
+
+<br>
+
+Na [Figura 16](#juca_ir_sensor) é possível visualizar como este módulo pode ser alocado na parte inferior de um possível chassi para o Juca, e quais posições podem ser escolhidas para cada pino de forma a detectar onde está posicionada uma linha no chão.
+
+<br>
+
+<div id="juca_ir_sensor" align="center">
+  <img src="figs/juca_ir_sensor.png" alt="Desenho representativo do módulo IR abaixo de um chassi hipotético para o Juca e possíveis posições de detecção e pinos utilizados." width="400">
+  <br>
+  <i>Figura 16: Desenho representativo do módulo IR abaixo de um chassi hipotético para o Juca e possíveis posições de detecção e pinos utilizados.</i>
+</div>
+
 
 
 ---
 ## Sensores de distância ultrassônicos
 
+O Juca possui uma interface para conexão com três dispositivos de detecção de obstáculos por ondas ultrassônicas. A interface criada pode ser observada no esquemático da [Figura 16](#hc_sr04_sch).
+
+
+<br>
+
+<div id="hc_sr04_sch" align="center">
+  <img src="figs/hc_sr04_sch.png" alt="Módulo HC-SR04." width="500">
+  <br>
+  <i>Figura 17: Esquemático da interface de conexão com os módulos ultrassônicos.</i>
+</div>
+
+<br>
+
+Os dispositivos ultrassônicos pensados para serem utilizados no Juca são do modelo HC-SR04 ([Figura 17](#hc_sr04)). Apesar disso, existem outros modelos no mercado com a mesma interface, que poderiam ser utilizadas no lugar. O ângulo de alcance de cada  HC-SR04 é aproximadamente 15 graus, tomando como origem o centro do transdutor de ondas.
+
+<br>
+
+<div id="hc_sr04" align="center">
+  <img src="figs/hc_sr04.png" alt="Módulo HC-SR04." width="300">
+  <br>
+  <i>Figura 18: Módulo HC-SR04.</i>
+</div>
+
+<br>
+
+
+Conforme pode ser observado na [Figura 18](#ultrasonic_detect), além da alimentação, o HC-SR04 possui um pino de gatilho e um pino de eco. O pino de gatilho tem por função a recepção de um pulso com duração aproximada de 10 𝜇s gerada pelo microcontrolador por meio de GPIO. Após geração do pulso, uma onda ultrassônica de 40 kHz é liberada pelo atuador por um período de 200 𝜇s. A presença de um objeto no caminho da onda irá refleti-la como um eco na direção do sensor. No pino de eco será gerado um pulso com largura $T_{onda}$ igual ao intervalo entre geração da onda e captação do eco. Este pulso irá variar entre 150 𝜇s e 25 ms caso um objeto seja detectado, sendo 38 ms caso nenhum obstáculo seja atingido. A distância 𝑑 do transdutor ao obstáculo é dada pela seguinte equação:
+
+$$\begin{equation}
+d = \frac{v_{som} \cdot T_{onda}}{2} 
+\label{eq_ultrasonic}
+\end{equation}$$
+
+onde $v_{som}$ corresponde à velocidade do som no meio. Note que $T_{onda}/2$ corresponde ao tempo necessário para que a onda percorra o caminho entre o transdutor e o objeto – tempo relativo ao sinal gerado atingir o objeto, ou do eco atingir o sensor. Considerando como meio o ar em temperatura próxima aos 20 graus C, então  $v_{som}$ = 343 𝑚/𝑠 (HALLIDAY et al., 2013). Dessa forma, a distância do objeto pode variar entre 2,6 cm e 430 cm. Como a tensão nominal do HC-SR04 é 5 V, ele aceita sinal de 3V3 no pino de gatilho, mas o sinal gerado pelo eco é 5V. Por isso a interface no Juca utiliza um conversor de nível lógico (*level_shifter*).
+
+<br>
+
+<div id="ultrasonic_detect" align="center">
+  <img src="figs/ultrasonic_detect.png" alt="Ilustração do comportamento de detecção de objetos com o HC-SR04." width="500">
+  <br>
+  <i>Figura 19: Ilustração do comportamento de detecção de objetos com o HC-SR04.</i>
+</div>
+
+<br>
 
 
 ---
 ## IMU
 
+Os encoders são adequados em baixas frequências (estáticos/movimentos lentos). Uma Unidade de Medição Inercial - *Inertial Measurement Unit* (IMU) é adequada para capturar mudanças bruscas e rápidas (alta frequência). Ao aplicar um filtro EKF podemos combinar as duas fontes de dados, filtrando o ruído individual de cada sensor para gerar uma estimativa de pose muito mais robusta.
+
+Uma IMU é composta basicamente por dois sensores independentes: um acelerômetro (mede  aceleração linear) e um giroscópio (mede aceleração angular). O IMU utilizado no Juca é o MPU-6050, possuindo 6 graus de liberdade (6 DoF). Isso quer dizer quer ele é capaz de medir aceleração linear em 3 direções (XYZ) e angular em 3 direções (XYZ). Foi utilizado um módulo pronto para o MPU-6050, denominado frequentemente de ITG/MPU. Uma foto dessa placa, com uma representação dos eixos coordenados no corpo e o sentido do ângulos, podem ser observados na [Figura 20](#mpu6050_gyro).
+
+<br>
+
+<div id="mpu6050_gyro" align="center">
+  <img src="figs/mpu6050_gyro.jpg" alt="Uma foto a placa ITG/MPU (MPU-6050), com uma representação dos eixos coordenados no corpo e o sentido do ângulos." width="300">
+  <br>
+  <i>Figura 20: Uma foto a placa ITG/MPU (MPU-6050), com uma representação dos eixos coordenados no corpo e o sentido do ângulos.</i>
+</div>
+
+<br>
+
+No Juca, o CI está localizado dentro da área do módulo de expansão ([Figura 1](#juca_board)). Os pinos utilizados podem ser visualizados na [Figura 21](#imu_sch).
+
+<br>
+
+<div id="imu_sch" align="center">
+  <img src="figs/imu_sch.png" alt="Esquemático do MPU-6050 no Juca." width="300">
+  <br>
+  <i>Figura 21: Esquemático do MPU-6050 no Juca.</i>
+</div>
+
+<br>
+
+Seguem algumas especificações pertinentes:
+
+|**Categoria**|**Parâmetro**|**Detalhes / Valor**|
+|---|---|---|
+|**Alimentação**|Tensão de Operação (VCC)|**3.3V** (Conforme indicado no pino 8)|
+|**Comunicação**|Protocolo de Interface|**I2C** (Pinos SCL e SDA) compartilhados nos pinos de expansão|
+|**Pinagem (I2C)**|Clock / Dados|**Pino 6 (SCL)** e **Pino 5 (SDA)**|
+|**Interrupção**|Sinal de Saída|**Pino 1 (INT)** - Conectado à linha `IMU_INT`|
+|**Resolução**|ADC (Conversor Analógico-Digital)|**16 bits** por canal|
+|**Giroscópio**|Fundo de Escala (Configurado)|**500°/s** (Escalas de ±250, 500, 1000, 2000°/s)|
+|**Acelerômetro**|Eixos de Medição|**3 eixos** (X, Y, Z)|
+|**Endereço I2C**|Seleção de Endereço (AD0)|**Pino 2 (AD0)** - Não utilizados (NC)|
+|**Expansão**|Interface Auxiliar|**Pinos 3 (XCL) e 4 (XDA)** - Não utilizados (NC)|
 
 
 ---

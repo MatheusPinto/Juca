@@ -1,19 +1,19 @@
-#include "treeeyes_task.h"
+#include "threeeyes_task.h"
 
-const static char *TAG = "main_app";
+const static char *TAG = "three_eyes";
 
-portTASK_FUNCTION(Treeeyes, args)
+portTASK_FUNCTION(Threeeyes, args)
 {
-    TreeEyes_Init();
-	//TreeEyes_DisableLeft();
-    //TreeEyes_DisableRight();
+    ThreeEyes_Init();
+	//ThreeEyes_DisableLeft();
+    //ThreeEyes_DisableRight();
     ultrasonic_value_t sensor[3];
     char *near_sensor_name;
     char *sensor_name[] = {"left", "middle", "right"};
 	while(1)
 	{
-        TreeEyes_TrigAndWait(portMAX_DELAY);
-        TreeEyes_Read(&sensor[0], &sensor[1], &sensor[2]);
+        ThreeEyes_TrigAndWait(portMAX_DELAY);
+        ThreeEyes_Read(&sensor[0], &sensor[1], &sensor[2]);
         
         uint32_t min_ticks = 0xFFFFFFFF; 
         near_sensor_name = "none";

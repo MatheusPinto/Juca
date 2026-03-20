@@ -1,4 +1,4 @@
-#include "treeeyes.h"
+#include "threeeyes.h"
 #include "freertos/semphr.h"
 #include <inttypes.h>
 //#include "rom/ets_sys.h" // Para printf dentro de ISR
@@ -38,7 +38,7 @@ static bool hc_sr04_echo_callback(mcpwm_cap_channel_handle_t cap_chan, const mcp
     return false;
 }
 
-void TreeEyes_TrigAndWait( TickType_t xTicksToWait )
+void ThreeEyes_TrigAndWait( TickType_t xTicksToWait )
 {
     actualTaskHandle = xTaskGetCurrentTaskHandle();
     
@@ -71,7 +71,7 @@ void TreeEyes_TrigAndWait( TickType_t xTicksToWait )
     actualTaskHandle = NULL;
 }
 
-void TreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right)
+void ThreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right)
 {
     left->tof_ticks = sensors[0].value.tof_ticks;
     left->isUpdated = sensors[0].value.isUpdated;
@@ -83,7 +83,7 @@ void TreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultras
     right->isUpdated = sensors[2].value.isUpdated;
 }
 
-void TreeEyes_Init( void )
+void ThreeEyes_Init( void )
 {
     ESP_LOGI(TAG, "Configurando Timer de Captura");
     mcpwm_cap_timer_handle_t cap_timer = NULL;
@@ -138,19 +138,19 @@ void TreeEyes_Init( void )
     }
 }
 
-void TreeEyes_DisableLeft(void)
+void ThreeEyes_DisableLeft(void)
 {
     ESP_LOGI(TAG, "Habilitando canal de captura para o Sensor Esquerdo");
     ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[0].channel));
 }
 
-void TreeEyes_DisableMiddle(void)
+void ThreeEyes_DisableMiddle(void)
 {
     ESP_LOGI(TAG, "Habilitando canal de captura para o Sensor do Meio");
     ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[1].channel));
 }
 
-void TreeEyes_DisableRight(void)
+void ThreeEyes_DisableRight(void)
 {
     ESP_LOGI(TAG, "Habilitando canal de captura para o Sensor Direito");
     ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[2].channel));
