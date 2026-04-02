@@ -286,6 +286,9 @@ Na [Figura 16](#juca_ir_sensor) é possível visualizar como este módulo pode s
   <i>Figura 16: Desenho representativo do módulo IR abaixo de um chassi hipotético para o Juca e possíveis posições de detecção e pinos utilizados.</i>
 </div>
 
+<br>
+
+Para esse módulo é recomendada uma largura de linha de aproximadamente 20 mm.
 
 
 ---

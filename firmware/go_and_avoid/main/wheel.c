@@ -6,7 +6,7 @@
  */
 
 #include "wheel.h"
-
+#include <stdbool.h>
 const static char *WHEEL_TAG = "Wheels";
 
 static int adc_left_raw[2][10];
@@ -115,6 +115,253 @@ static motor_control_context_t motor_right_ctrl_ctx = {
     pcnt_channel_handle_t pcnt_chan_b_right = NULL;
 
     /*******************************************************************************************/
+
+
+
+
+
+static wheel_cmd_t current_cmd = {0};
+
+#define PWM_MAX BDC_MCPWM_DUTY_TICK_MAX  // ou o valor real do seu driver
+
+static void wheel_apply(void);
+
+static inline uint32_t clamp_pwm(uint32_t val)
+{
+    if (val > PWM_MAX) return PWM_MAX;
+    return val;
+}
+
+    // ================================
+// Controle global de PWM (binário)
+// ================================
+static volatile bool pwm_enabled = true;
+static portMUX_TYPE pwm_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static inline void set_pwm_enabled(bool val)
+{
+    portENTER_CRITICAL(&pwm_mux);
+    pwm_enabled = val;
+    portEXIT_CRITICAL(&pwm_mux);
+}
+
+bool power_manager_is_enabled(void)
+{
+    return pwm_enabled;
+}
+
+
+void wheel_SetRawSpeed(
+    wheel_dir_t dir_left, uint32_t pwm_left,
+    wheel_dir_t dir_right, uint32_t pwm_right)
+{
+    current_cmd.dir_left  = dir_left;
+    current_cmd.dir_right = dir_right;
+
+    current_cmd.pwm_left  = clamp_pwm(pwm_left);
+    current_cmd.pwm_right = clamp_pwm(pwm_right);
+
+    wheel_apply();
+}
+
+static void wheel_apply(void)
+{
+    wheel_cmd_t cmd = current_cmd;
+
+    if (!power_manager_is_enabled())
+    {
+        cmd.pwm_left = 0;
+        cmd.pwm_right = 0;
+    }
+
+    // Esquerdo
+    if (cmd.pwm_left == 0 || cmd.dir_left == WHEEL_STOP)
+    {
+        bdc_motor_brake(motor_left);
+    }
+    else
+    {
+        if (cmd.dir_left == WHEEL_FORWARD)
+            bdc_motor_forward(motor_left);
+        else
+            bdc_motor_reverse(motor_left);
+
+        aplicar_pwm_left(cmd.pwm_left);
+    }
+
+    // Direito
+    if (cmd.pwm_right == 0 || cmd.dir_right == WHEEL_STOP)
+    {
+        bdc_motor_brake(motor_right);
+    }
+    else
+    {
+        if (cmd.dir_right == WHEEL_FORWARD)
+            bdc_motor_forward(motor_right);
+        else
+            bdc_motor_reverse(motor_right);
+
+        aplicar_pwm_right(cmd.pwm_right);
+    }
+}
+
+// ================================
+// Task de monitoramento
+// ================================
+portTASK_FUNCTION(power_tracker, arg)
+{
+    uint32_t power_left_wheel, power_right_wheel;
+
+    int contador_stall = 0;
+    bool stall_ativo = false;
+
+    // Limiares
+    const int LIMITE_STALL = 4000;
+    const int LIMITE_LIBERACAO = 3000;
+
+    // Parâmetros de detecção
+    const int TEMPO_STALL = 10; // número de ciclos
+
+    // Período adaptativo
+    int periodo_ms = 200;
+
+    TickType_t last_wake = xTaskGetTickCount();
+
+    for (;;)
+    {
+        wheel_GetPower(&power_left_wheel, &power_right_wheel);
+
+        bool corrente_alta = (power_left_wheel > LIMITE_STALL ||
+                             power_right_wheel > LIMITE_STALL);
+
+        // ============================
+        // Ajuste dinâmico do período
+        // ============================
+        if (corrente_alta)
+        {
+            if (periodo_ms > 10)
+            {
+                periodo_ms /= 2;
+                if (periodo_ms < 10)
+                    periodo_ms = 10;
+
+                // evita drift ao mudar muito rápido
+                last_wake = xTaskGetTickCount();
+            }
+        }
+        else
+        {
+            if (periodo_ms < 200)
+            {
+                periodo_ms += 10;
+                if (periodo_ms > 200)
+                    periodo_ms = 200;
+            }
+        }
+
+        // ============================
+        // Contador de stall
+        // ============================
+        if (corrente_alta)
+        {
+            if (contador_stall < TEMPO_STALL)
+                contador_stall++;
+        }
+        else
+        {
+            if (contador_stall > 0)
+                contador_stall--;
+        }
+
+        // ============================
+        // Detecta stall
+        // ============================
+        if (!stall_ativo && contador_stall >= TEMPO_STALL)
+        {
+            stall_ativo = true;
+            set_pwm_enabled(false);
+            wheel_SetVel(0, 0); // garante parada imediata
+
+            ESP_LOGI(WHEEL_TAG, "Motor Stall!!!! Wheels blocked.");
+        }
+
+        // ============================
+        // Liberação (com histerese)
+        // ============================
+        bool corrente_baixa = (power_left_wheel < LIMITE_LIBERACAO &&
+                              power_right_wheel < LIMITE_LIBERACAO);
+
+        if (stall_ativo && corrente_baixa && contador_stall == 0)
+        {
+            stall_ativo = false;
+            set_pwm_enabled(true);
+
+            ESP_LOGI(WHEEL_TAG, "Wheels unblocked.");
+        }
+
+        // ============================
+        // Delay determinístico
+        // ============================
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(periodo_ms));
+    }
+}
+
+portTASK_FUNCTION(speed_ctrl, arg)
+{
+    wheel_cmd_t cmd_local;
+
+    TickType_t last_wake = xTaskGetTickCount();
+
+    for (;;)
+    {
+        // Copia comando (snapshot)
+        cmd_local = current_cmd;
+
+        // Proteção global
+        if (!power_manager_is_enabled())
+        {
+            cmd_local.pwm_left  = 0;
+            cmd_local.pwm_right = 0;
+        }
+
+        // =========================
+        // Motor esquerdo
+        // =========================
+        if (cmd_local.pwm_left == 0 || cmd_local.dir_left == WHEEL_STOP)
+        {
+            bdc_motor_stop(motor_left);
+        }
+        else
+        {
+            if (cmd_local.dir_left == WHEEL_FORWARD)
+                bdc_motor_forward(motor_left);
+            else
+                bdc_motor_reverse(motor_left);
+
+            aplicar_pwm_left(cmd_local.pwm_left);
+        }
+
+        // =========================
+        // Motor direito
+        // =========================
+        if (cmd_local.pwm_right == 0 || cmd_local.dir_right == WHEEL_STOP)
+        {
+            bdc_motor_stop(motor_right);
+        }
+        else
+        {
+            if (cmd_local.dir_right == WHEEL_FORWARD)
+                bdc_motor_forward(motor_right);
+            else
+                bdc_motor_reverse(motor_right);
+
+            aplicar_pwm_right(cmd_local.pwm_right);
+        }
+
+        // Frequência de atualização
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20)); // 50 Hz
+    }
+}
 
 
 int wheel_Init( void )
@@ -243,33 +490,18 @@ int wheel_Init( void )
 	bdc_motor_set_speed(motor_left, 0);
     bdc_motor_set_speed(motor_right, 0);
 
-    
+    xTaskCreate(
+        power_tracker,
+        "pw_trck",
+        configMINIMAL_STACK_SIZE*3,
+        NULL,
+        configMAX_PRIORITIES - 1,
+        NULL
+    );
+
     return 1;
 }
 
-void wheel_GoForward( void )
-{
-	ESP_LOGI(WHEEL_TAG, "Forward motors");
-    ESP_ERROR_CHECK(bdc_motor_forward(motor_left));
-    ESP_ERROR_CHECK(bdc_motor_forward(motor_right));
-}
-
-void wheel_GoBackward( void )
-{
-	ESP_LOGI(WHEEL_TAG, "Backward motors");
-	ESP_ERROR_CHECK(bdc_motor_reverse(motor_left));
-	ESP_ERROR_CHECK(bdc_motor_reverse(motor_right));
-}
-
-
-
-int wheel_SetVel( uint32_t wL, uint32_t wR)
-{
-	bdc_motor_set_speed(motor_left, wL);
-    bdc_motor_set_speed(motor_right, wR);
-    
-    return 1;
-}
 
 void wheel_GetPower( uint32_t *pL, uint32_t *pR )
 {

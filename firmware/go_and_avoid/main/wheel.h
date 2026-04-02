@@ -54,13 +54,24 @@ typedef struct {
 } motor_control_context_t;
 
 
+typedef enum {
+    WHEEL_STOP = 0,
+    WHEEL_FORWARD,
+    WHEEL_REVERSE
+} wheel_dir_t;
+
+typedef struct {
+    wheel_dir_t dir_left;
+    wheel_dir_t dir_right;
+    uint32_t pwm_left;
+    uint32_t pwm_right;
+} wheel_cmd_t;
+
 int wheel_Init( void );
 
-void wheel_GoForward( void );
-
-void wheel_GoBackward( void );
-
-int wheel_SetVel( uint32_t wL, uint32_t wR);
+void wheel_SetRawSpeed(
+    wheel_dir_t dir_left, uint32_t pwm_left,
+    wheel_dir_t dir_right, uint32_t pwm_right);
 
 void wheel_GetPower( uint32_t *pL, uint32_t *pR );
 

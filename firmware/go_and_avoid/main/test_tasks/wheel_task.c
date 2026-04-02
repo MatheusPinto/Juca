@@ -20,7 +20,7 @@ const static char *TAG = "wheels";
 portTASK_FUNCTION(wheel_ctrl, arg)
 {
 	wheel_Init();
-	wheel_SetVel(BDC_MCPWM_DUTY_TICK_MAX, BDC_MCPWM_DUTY_TICK_MAX);
+	//wheel_SetVel(BDC_MCPWM_DUTY_TICK_MAX, BDC_MCPWM_DUTY_TICK_MAX);
 
 	uint32_t power_left_wheel, power_right_wheel; 
 
@@ -34,22 +34,24 @@ portTASK_FUNCTION(wheel_ctrl, arg)
 			  count = 0;
             if (dir == 0) 
             {
-              wheel_GoForward();
+              //wheel_GoForward
+              wheel_SetRawSpeed(WHEEL_FORWARD, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_FORWARD, BDC_MCPWM_DUTY_TICK_MAX);
               dir = 1;
             } 
             else 
             {
-              wheel_GoBackward();
+              //wheel_GoBackward();
+              wheel_SetRawSpeed(WHEEL_BACKWARD, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_BACKWARD, BDC_MCPWM_DUTY_TICK_MAX);
               dir = 0;
             }
           }
           
           wheel_GetEndoderPulses(&pL, &pR);
-          ESP_LOGI(TAG, "Left encoder: %d\tRight encoder: %d\r\n", pL, pR);
+          //ESP_LOGI(TAG, "Left encoder: %d\tRight encoder: %d\r\n", pL, pR);
           
           
-          //wheel_GetPower(&power_left_wheel, &power_right_wheel);
-          //printf("Left ADC: %" PRIu32 "; \t Right ADC: %" PRIu32 ".\n", power_left_wheel, power_right_wheel);
+          wheel_GetPower(&power_left_wheel, &power_right_wheel);
+          printf("Left ADC: %" PRIu32 "; \t Right ADC: %" PRIu32 ".\n", power_left_wheel, power_right_wheel);
 
 		  //printf("Left ADC: %d\n", adc_left_raw[1][0]);
           
