@@ -122,7 +122,7 @@ static motor_control_context_t motor_right_ctrl_ctx = {
 
 static wheel_cmd_t current_cmd = {0};
 
-#define PWM_MAX BDC_MCPWM_DUTY_TICK_MAX  // ou o valor real do seu driver
+
 
 static void wheel_apply(void);
 
@@ -137,6 +137,17 @@ static inline uint32_t clamp_pwm(uint32_t val)
 // ================================
 static volatile bool pwm_enabled = true;
 static portMUX_TYPE pwm_mux = portMUX_INITIALIZER_UNLOCKED;
+
+
+void aplicar_pwm_right(uint32_t pwm)
+{
+    ESP_ERROR_CHECK(bdc_motor_set_speed(motor_right, pwm));
+}
+
+void aplicar_pwm_left(uint32_t pwm)
+{
+    ESP_ERROR_CHECK(bdc_motor_set_speed(motor_left, pwm));
+}
 
 static inline void set_pwm_enabled(bool val)
 {
@@ -280,7 +291,10 @@ portTASK_FUNCTION(power_tracker, arg)
         {
             stall_ativo = true;
             set_pwm_enabled(false);
-            wheel_SetVel(0, 0); // garante parada imediata
+            
+            // garante parada imediata
+            bdc_motor_brake(motor_left);
+            bdc_motor_brake(motor_right);
 
             ESP_LOGI(WHEEL_TAG, "Motor Stall!!!! Wheels blocked.");
         }
@@ -329,7 +343,7 @@ portTASK_FUNCTION(speed_ctrl, arg)
         // =========================
         if (cmd_local.pwm_left == 0 || cmd_local.dir_left == WHEEL_STOP)
         {
-            bdc_motor_stop(motor_left);
+            bdc_motor_brake(motor_left);
         }
         else
         {
@@ -346,7 +360,7 @@ portTASK_FUNCTION(speed_ctrl, arg)
         // =========================
         if (cmd_local.pwm_right == 0 || cmd_local.dir_right == WHEEL_STOP)
         {
-            bdc_motor_stop(motor_right);
+            bdc_motor_brake(motor_right);
         }
         else
         {

@@ -41,7 +41,7 @@ portTASK_FUNCTION(wheel_ctrl, arg)
             else 
             {
               //wheel_GoBackward();
-              wheel_SetRawSpeed(WHEEL_BACKWARD, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_BACKWARD, BDC_MCPWM_DUTY_TICK_MAX);
+              wheel_SetRawSpeed(WHEEL_REVERSE, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_REVERSE, BDC_MCPWM_DUTY_TICK_MAX);
               dir = 0;
             }
           }

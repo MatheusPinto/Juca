@@ -45,6 +45,7 @@
 #define WHEELS_ENCODER_PPR 900
 #define WHELL_RADIUS 0.033 //33cm
 
+#define PWM_MAX BDC_MCPWM_DUTY_TICK_MAX  // ou o valor real do seu driver
 
 typedef struct {
     bdc_motor_handle_t motor;
