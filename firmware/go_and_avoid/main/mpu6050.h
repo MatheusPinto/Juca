@@ -1,7 +1,7 @@
 #ifndef MPU6050_H
 #define MPU6050_H
 
-#include "freertos/Freertos.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2c.h"
 #include "esp_log.h"

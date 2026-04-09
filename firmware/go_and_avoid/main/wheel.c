@@ -227,8 +227,8 @@ portTASK_FUNCTION(power_tracker, arg)
     bool stall_ativo = false;
 
     // Limiares
-    const int LIMITE_STALL = 4000;
-    const int LIMITE_LIBERACAO = 3000;
+    const int LIMITE_STALL = 2500;
+    const int LIMITE_LIBERACAO = 1500;
 
     // Parâmetros de detecção
     const int TEMPO_STALL = 10; // número de ciclos
