@@ -23,11 +23,13 @@
 #include "threeeyes_task.h"
 #include "wheel_task.h"
 #include "imu_task.h"
+#include "ir_line_task.h"
 #include <inttypes.h>
 
-#define THREE_EYES_TASK
-#define IMU_TASK
-#define WHEEL_CTRL_TASK
+//#define THREE_EYES_TASK
+//#define IMU_TASK
+//#define WHEEL_CTRL_TASK
+#define IR_LINE_TASK
 
 void app_main(void)
 {
@@ -52,6 +54,15 @@ void app_main(void)
 #ifdef WHEEL_CTRL_TASK
     xTaskCreate(wheel_ctrl,
                 "wheel",
+                configMINIMAL_STACK_SIZE*3,
+                NULL,
+                5,
+                NULL);
+#endif
+
+#ifdef IR_LINE_TASK
+    xTaskCreate(ir_line_follow,
+                "line",
                 configMINIMAL_STACK_SIZE*3,
                 NULL,
                 5,
