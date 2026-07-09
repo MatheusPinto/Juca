@@ -26,15 +26,15 @@
 #define BDC_MCPWM_TIMER_RESOLUTION_HZ 10000000 // 10MHz, 1 tick = 0.1us
 #define BDC_MCPWM_FREQ_HZ             25000    // 25KHz PWM
 #define BDC_MCPWM_DUTY_TICK_MAX       (BDC_MCPWM_TIMER_RESOLUTION_HZ / BDC_MCPWM_FREQ_HZ) // maximum value we can set for the duty cycle, in ticks
-#define BDC_LEFT_MCPWM_GPIO_A              GPIO_NUM_11
-#define BDC_LEFT_MCPWM_GPIO_B              GPIO_NUM_10
-#define BDC_RIGHT_MCPWM_GPIO_A              GPIO_NUM_12
-#define BDC_RIGHT_MCPWM_GPIO_B              GPIO_NUM_13
+#define BDC_LEFT_MCPWM_GPIO_A              GPIO_NUM_12
+#define BDC_LEFT_MCPWM_GPIO_B              GPIO_NUM_13
+#define BDC_RIGHT_MCPWM_GPIO_A              GPIO_NUM_11
+#define BDC_RIGHT_MCPWM_GPIO_B              GPIO_NUM_10
 
-#define BDC_ENCODER_LEFT_GPIO_A            GPIO_NUM_14
-#define BDC_ENCODER_LEFT_GPIO_B            GPIO_NUM_21
-#define BDC_ENCODER_RIGHT_GPIO_A            GPIO_NUM_7
-#define BDC_ENCODER_RIGHT_GPIO_B            GPIO_NUM_6
+#define BDC_ENCODER_LEFT_GPIO_A            GPIO_NUM_7
+#define BDC_ENCODER_LEFT_GPIO_B            GPIO_NUM_6
+#define BDC_ENCODER_RIGHT_GPIO_A            GPIO_NUM_21
+#define BDC_ENCODER_RIGHT_GPIO_B            GPIO_NUM_14
 #define BDC_ENCODER_PCNT_HIGH_LIMIT   7000 // esses valores de limite de contagem podem ser usados para reiniciar a contagem, e/ou para gerar interrupção quando chegar ao limite. Aqui esses valores são irrelevantes, pois não são usados.
 #define BDC_ENCODER_PCNT_LOW_LIMIT    -7000
 
