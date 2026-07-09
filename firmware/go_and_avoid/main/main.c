@@ -26,10 +26,10 @@
 #include "ir_line_task.h"
 #include <inttypes.h>
 
-//#define THREE_EYES_TASK
+#define THREE_EYES_TASK
 //#define IMU_TASK
-//#define WHEEL_CTRL_TASK
-#define IR_LINE_TASK
+#define WHEEL_CTRL_TASK
+//#define IR_LINE_TASK
 
 void app_main(void)
 {
