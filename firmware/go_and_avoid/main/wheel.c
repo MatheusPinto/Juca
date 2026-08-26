@@ -351,14 +351,14 @@ portTASK_FUNCTION(power_tracker, arg)
     bool active_stall = false;
 
     /* Thresholds (raw ADC current reading) */
-    const int LIMITE_STALL = 2500;
-    const int LIMITE_LIBERACAO = 1500;
+    const int STALL_LIMIT = WHEEL_STALL_LIMIT_VALUE;
+    const int RELEASE_LIMIT = WHEEL_MOTOR_RELEASE_LIMIT_VALUE;
 
     /* Detection parameters */
-    const int TEMPO_STALL = 10; /* number of cycles */
+    const int STALL_TIME = WHEEL_MOTOR_STALL_TIME_VALUE; /* number of cycles */
 
     /* Adaptive polling period */
-    int ms_period = 200;
+    int ms_period = WHEEL_POWER_TRACKER_TASK_BASE_PERIOD;
 
     TickType_t last_wake = xTaskGetTickCount();
 
@@ -366,8 +366,8 @@ portTASK_FUNCTION(power_tracker, arg)
     {
         wheel_GetPower(&power_left_wheel, &power_right_wheel);
 
-        bool high_current = (power_left_wheel > LIMITE_STALL ||
-                             power_right_wheel > LIMITE_STALL);
+        bool high_current = (power_left_wheel > STALL_LIMIT ||
+                             power_right_wheel > STALL_LIMIT);
 
         /* ============================
          * Dynamic period adjustment
@@ -399,7 +399,7 @@ portTASK_FUNCTION(power_tracker, arg)
          * ============================ */
         if (high_current)
         {
-            if (stall_counter < TEMPO_STALL)
+            if (stall_counter < STALL_TIME)
                 stall_counter++;
         }
         else
@@ -411,7 +411,7 @@ portTASK_FUNCTION(power_tracker, arg)
         /* ============================
          * Stall detection
          * ============================ */
-        if (!active_stall && stall_counter >= TEMPO_STALL)
+        if (!active_stall && stall_counter >= STALL_TIME)
         {
             active_stall = true;
             set_pwm_enabled(false);
@@ -426,8 +426,8 @@ portTASK_FUNCTION(power_tracker, arg)
         /* ============================
          * Release (with hysteresis)
          * ============================ */
-        bool low_current = (power_left_wheel < LIMITE_LIBERACAO &&
-                              power_right_wheel < LIMITE_LIBERACAO);
+        bool low_current = (power_left_wheel < RELEASE_LIMIT &&
+                              power_right_wheel < RELEASE_LIMIT);
 
         if (active_stall && low_current && stall_counter == 0)
         {
@@ -508,7 +508,7 @@ portTASK_FUNCTION(speed_ctrl, arg)
         }
 
         /* Update rate */
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20)); /* 50 Hz */
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(WHEEL_SPEED_CTRL_TASK_PERIOD));
     }
 }
 

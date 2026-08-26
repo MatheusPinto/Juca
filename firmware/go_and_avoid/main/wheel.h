@@ -103,6 +103,16 @@
 /** Maximum allowed PWM duty cycle value (currently the MCPWM tick resolution). */
 #define PWM_MAX BDC_MCPWM_DUTY_TICK_MAX
 
+/** ADC values from current sensor that brake the motors and the release value to motor to go on */
+#define WHEEL_STALL_LIMIT_VALUE  2500
+#define WHEEL_MOTOR_RELEASE_LIMIT_VALUE 1500
+
+#define WHEEL_MOTOR_STALL_TIME_VALUE 10
+
+#define WHEEL_POWER_TRACKER_TASK_BASE_PERIOD 200
+#define WHEEL_SPEED_CTRL_TASK_PERIOD 20 /*50 Hz*/
+
+
 /* ============================================================================
  *                              DATA TYPES
  * ==========================================================================*/
