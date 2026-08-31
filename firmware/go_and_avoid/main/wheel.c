@@ -19,11 +19,12 @@
 
 /** Log tag used by ESP_LOG* calls in this module. */
 const static char *WHEEL_TAG = "Wheels";
-
 /** Raw ADC samples buffer for the left motor current sensor. */
 static int adc_left_raw[2][10];
 /** Raw ADC samples buffer for the right motor current sensor. */
 static int adc_right_raw[2][10];
+/** Maximum allowed PWM duty cycle value (currently the MCPWM tick resolution). */
+static const uint32_t PWM_MAX = WHEEL_PWM_DUTY_TICK_MAX;
 
 /* ============================================================================
  *                              ADC CONFIGURATION
@@ -61,16 +62,16 @@ static motor_control_context_t motor_right_ctrl_ctx = {
 
 /** Left motor MCPWM GPIO / frequency configuration. */
 bdc_motor_config_t motor_left_config = {
-    .pwm_freq_hz = BDC_MCPWM_FREQ_HZ,
-    .pwma_gpio_num = BDC_LEFT_MCPWM_GPIO_A,
-    .pwmb_gpio_num = BDC_LEFT_MCPWM_GPIO_B,
+    .pwm_freq_hz = WHEEL_PWM_FREQ_HZ,
+    .pwma_gpio_num = WHEEL_LEFT_PWM_GPIO_A,
+    .pwmb_gpio_num = WHEEL_LEFT_PWM_GPIO_B,
 };
 
 /** Right motor MCPWM GPIO / frequency configuration. */
 bdc_motor_config_t motor_right_config = {
-    .pwm_freq_hz = BDC_MCPWM_FREQ_HZ,
-    .pwma_gpio_num = BDC_RIGHT_MCPWM_GPIO_A,
-    .pwmb_gpio_num = BDC_RIGHT_MCPWM_GPIO_B,
+    .pwm_freq_hz = WHEEL_PWM_FREQ_HZ,
+    .pwma_gpio_num = WHEEL_RIGHT_PWM_GPIO_A,
+    .pwmb_gpio_num = WHEEL_RIGHT_PWM_GPIO_B,
 };
 
 /* ============================================================================
@@ -80,7 +81,7 @@ bdc_motor_config_t motor_right_config = {
 /** MCPWM group/resolution configuration shared by both motors. */
 bdc_motor_mcpwm_config_t mcpwm_config = {
     .group_id = 0,
-    .resolution_hz = BDC_MCPWM_TIMER_RESOLUTION_HZ,
+    .resolution_hz = WHEEL_TIMER_RESOLUTION_HZ,
 };
 
 /* ============================================================================
@@ -98,8 +99,8 @@ bdc_motor_handle_t motor_right = NULL;
 
 /** General pulse counter unit configuration, shared by both encoders. */
 pcnt_unit_config_t pcnt_unit_config = {
-    .high_limit = BDC_ENCODER_PCNT_HIGH_LIMIT,
-    .low_limit = BDC_ENCODER_PCNT_LOW_LIMIT,
+    .high_limit = WHEEL_ENCODER_PCNT_HIGH_LIMIT,
+    .low_limit = WHEEL_ENCODER_PCNT_LOW_LIMIT,
     .flags.accum_count = true, /**< Enable counter accumulation. */
 };
 
@@ -123,14 +124,14 @@ pcnt_unit_handle_t pcnt_right_unit = NULL;
 
 /** Left encoder - channel A GPIO configuration (edge/level pins). */
 pcnt_chan_config_t chan_a_left_config = {
-    .edge_gpio_num = BDC_ENCODER_LEFT_GPIO_A,
-    .level_gpio_num = BDC_ENCODER_LEFT_GPIO_B,
+    .edge_gpio_num = WHEEL_ENCODER_LEFT_GPIO_A,
+    .level_gpio_num = WHEEL_ENCODER_LEFT_GPIO_B,
 };
 
 /** Right encoder - channel A GPIO configuration (edge/level pins). */
 pcnt_chan_config_t chan_a_right_config = {
-    .edge_gpio_num = BDC_ENCODER_RIGHT_GPIO_A,
-    .level_gpio_num = BDC_ENCODER_RIGHT_GPIO_B,
+    .edge_gpio_num = WHEEL_ENCODER_RIGHT_GPIO_A,
+    .level_gpio_num = WHEEL_ENCODER_RIGHT_GPIO_B,
 };
 
 /** Left encoder - channel A handle. */
@@ -140,14 +141,14 @@ pcnt_channel_handle_t pcnt_chan_a_right = NULL;
 
 /** Left encoder - channel B GPIO configuration (edge/level pins). */
 pcnt_chan_config_t chan_b_left_config = {
-    .edge_gpio_num = BDC_ENCODER_LEFT_GPIO_B,
-    .level_gpio_num = BDC_ENCODER_LEFT_GPIO_A,
+    .edge_gpio_num = WHEEL_ENCODER_LEFT_GPIO_B,
+    .level_gpio_num = WHEEL_ENCODER_LEFT_GPIO_A,
 };
 
 /** Right encoder - channel B GPIO configuration (edge/level pins). */
 pcnt_chan_config_t chan_b_right_config = {
-    .edge_gpio_num = BDC_ENCODER_RIGHT_GPIO_B,
-    .level_gpio_num = BDC_ENCODER_RIGHT_GPIO_A,
+    .edge_gpio_num = WHEEL_ENCODER_RIGHT_GPIO_B,
+    .level_gpio_num = WHEEL_ENCODER_RIGHT_GPIO_A,
 };
 
 /** Left encoder - channel B handle. */
@@ -247,13 +248,20 @@ void apply_pwm_left(uint32_t pwm)
  *
  * The provided PWM values are clamped to the maximum allowed duty cycle,
  * stored as the current command, and immediately applied to the motors.
+ * 
+ * @note To minimize overhead and latency, this function is not thread-safe.
+ *       Any concurrent access must be handled at the application level
+ *       (e.g., using a gatekeeper task or a mutex).
+ * 
+ * @note To control only one wheel, the caller must explicitly pass the current
+ *       state (direction and PWM) of the other wheel to preserve its operation.
  *
  * @param dir_left  Desired direction for the left wheel.
  * @param pwm_left  Desired PWM duty cycle for the left wheel.
  * @param dir_right Desired direction for the right wheel.
  * @param pwm_right Desired PWM duty cycle for the right wheel.
  */
-void wheel_SetRawSpeed(
+void wheel_SetDutyCycle(
     wheel_dir_t dir_left, uint32_t pwm_left,
     wheel_dir_t dir_right, uint32_t pwm_right)
 {
@@ -263,6 +271,49 @@ void wheel_SetRawSpeed(
     current_cmd.pwm_left  = clamp_pwm(pwm_left);
     current_cmd.pwm_right = clamp_pwm(pwm_right);
 
+    wheel_apply();
+}
+
+/**
+ * @brief Set the power and direction for both wheels using signed power values.
+ *
+ * Positive values set the wheel direction to forward, while negative values set it to
+ * backward. The magnitude of the value represents the PWM duty cycle, which is clamped
+ * to the maximum allowed limit.
+ *
+ * @note To minimize overhead and latency, this function is not thread-safe.
+ *       Any concurrent access must be handled at the application level
+ *       (e.g., using a gatekeeper task or a mutex).
+ *
+ * @note To control only one wheel, the caller must explicitly pass the current
+ *       power value of the other wheel to preserve its operation.
+ *
+ * @param power_left  Signed power for left wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
+ * @param power_right Signed power for right wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
+ */
+void wheel_SetPower(int32_t power_left, int32_t power_right)
+{
+    // 1. Clamping do valor nos limites suportados [-WHEEL_POWER_MAX, WHEEL_POWER_MAX]
+    if (power_left > WHEEL_POWER_MAX) {
+        power_left = WHEEL_POWER_MAX;
+    } else if (power_left < -WHEEL_POWER_MAX) {
+        power_left = -WHEEL_POWER_MAX;
+    }
+
+    if (power_right > WHEEL_POWER_MAX) {
+        power_right = WHEEL_POWER_MAX;
+    } else if (power_right < -WHEEL_POWER_MAX) {
+        power_right = -WHEEL_POWER_MAX;
+    }
+
+    // 2. Extração da direção e magnitude (PWM) baseadas no sinal do parâmetro
+    current_cmd.dir_left = (power_left >= 0) ? WHEEL_FORWARD : WHEEL_REVERSE;
+    current_cmd.pwm_left = (uint32_t)abs(power_left);
+
+    current_cmd.dir_right = (power_right >= 0) ? WHEEL_FORWARD : WHEEL_REVERSE;
+    current_cmd.pwm_right = (uint32_t)abs(power_right);
+    
+    // 3. Aplicação direta no periférico de hardware
     wheel_apply();
 }
 
@@ -543,14 +594,6 @@ int wheel_Init( void )
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_8, &adc_config));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_1, &adc_config));
 
-    //ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_right_motor_handle, ADC_CHANNEL_8, &config));
-
-    /* ---------------------------------------------------------------
-     * General motor config structs (declared statically above)
-     * --------------------------------------------------------------- */
-    //   ESP_LOGI(TAG, "Create DC motor Left");
-    //   ESP_LOGI(TAG, "Create DC motor Right");
-
     /* ---------------------------------------------------------------
      * Create motor handles
      * --------------------------------------------------------------- */
@@ -562,7 +605,6 @@ int wheel_Init( void )
     /* ---------------------------------------------------------------
      * Encoder pulse counter config structs (declared statically above)
      * --------------------------------------------------------------- */
-    // ESP_LOGI(TAG, "Init pcnt driver to decode rotary signal");
 
     /* ---------------------------------------------------------------
      * Create encoder pulse counter unit handles
@@ -631,11 +673,11 @@ int wheel_Init( void )
     /* ---------------------------------------------------------------
      * Configure pulse counter watch points
      * --------------------------------------------------------------- */
-    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_left_unit, BDC_ENCODER_PCNT_HIGH_LIMIT));
-    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_left_unit, BDC_ENCODER_PCNT_LOW_LIMIT));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_left_unit, WHEEL_ENCODER_PCNT_HIGH_LIMIT));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_left_unit, WHEEL_ENCODER_PCNT_LOW_LIMIT));
 
-    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_right_unit, BDC_ENCODER_PCNT_HIGH_LIMIT));
-    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_right_unit, BDC_ENCODER_PCNT_LOW_LIMIT));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_right_unit, WHEEL_ENCODER_PCNT_HIGH_LIMIT));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_right_unit, WHEEL_ENCODER_PCNT_LOW_LIMIT));
 
     /* ---------------------------------------------------------------
      * Enable and start the pulse counter modules
@@ -658,8 +700,6 @@ int wheel_Init( void )
     ESP_LOGI(WHEEL_TAG, "Forward motors");
     ESP_ERROR_CHECK(bdc_motor_forward(motor_left));
     ESP_ERROR_CHECK(bdc_motor_forward(motor_right));
-    //ESP_LOGI(TAG, "Start motor speed loop");
-    //ESP_ERROR_CHECK(esp_timer_start_periodic(pid_loop_timer, BDC_PID_LOOP_PERIOD_MS * 1000));
 
     bdc_motor_set_speed(motor_left, 0);
     bdc_motor_set_speed(motor_right, 0);
@@ -691,8 +731,6 @@ void wheel_GetPower( uint32_t *pL, uint32_t *pR )
     ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_8, &adc_left_raw[1][0]));
     *pL = adc_left_raw[1][0];
     *pR = adc_right_raw[1][0];
-    //printf("Left ADC: %d; \t Right ADC: %d.\n", adc_left_raw[1][0], adc_right_raw[1][0]);
-    //printf("Left ADC: %d\n", adc_left_raw[1][0]);
 }
 
 /**
@@ -705,5 +743,4 @@ void wheel_GetEndoderPulses( int *pL, int *pR )
 {
     pcnt_unit_get_count(pcnt_left_unit, pL);
     pcnt_unit_get_count(pcnt_right_unit, pR);
-    //printf("Left encoder: %d\tRight encoder: %d\r\n", cur_left_pulse_count, cur_right_pulse_count);
 }

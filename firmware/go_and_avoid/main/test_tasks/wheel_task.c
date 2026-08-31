@@ -20,7 +20,7 @@ const static char *TAG = "wheels";
 portTASK_FUNCTION(wheel_ctrl, arg)
 {
 	wheel_Init();
-	//wheel_SetVel(BDC_MCPWM_DUTY_TICK_MAX, BDC_MCPWM_DUTY_TICK_MAX);
+	//wheel_SetVel(WHEEL_PWM_DUTY_TICK_MAX, WHEEL_PWM_DUTY_TICK_MAX);
 
 	uint32_t power_left_wheel, power_right_wheel; 
 
@@ -34,14 +34,12 @@ portTASK_FUNCTION(wheel_ctrl, arg)
 			  count = 0;
             if (dir == 0) 
             {
-              //wheel_GoForward
-              wheel_SetRawSpeed(WHEEL_FORWARD, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_FORWARD, BDC_MCPWM_DUTY_TICK_MAX);
+              wheel_SetDutyCycle(WHEEL_FORWARD, WHEEL_PWM_DUTY_TICK_MAX, WHEEL_FORWARD, WHEEL_PWM_DUTY_TICK_MAX);
               dir = 1;
             } 
             else 
             {
-              //wheel_GoBackward();
-              wheel_SetRawSpeed(WHEEL_REVERSE, BDC_MCPWM_DUTY_TICK_MAX, WHEEL_REVERSE, BDC_MCPWM_DUTY_TICK_MAX);
+              wheel_SetDutyCycle(WHEEL_REVERSE, WHEEL_PWM_DUTY_TICK_MAX, WHEEL_REVERSE, WHEEL_PWM_DUTY_TICK_MAX);
               dir = 0;
             }
           }

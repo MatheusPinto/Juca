@@ -22,7 +22,6 @@
 #include "esp_timer.h"
 #include "driver/pulse_cnt.h"
 #include "bdc_motor.h"
-#include "pid_ctrl.h"
 #include "hal/gpio_types.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
@@ -33,37 +32,39 @@
  * ==========================================================================*/
 
 /** MCPWM timer resolution, in Hz (10 MHz -> 1 tick = 0.1 us). */
-#define BDC_MCPWM_TIMER_RESOLUTION_HZ 10000000
+#define WHEEL_TIMER_RESOLUTION_HZ 10000000
 /** PWM switching frequency applied to the motor drivers, in Hz. */
-#define BDC_MCPWM_FREQ_HZ             25000
+#define WHEEL_PWM_FREQ_HZ             25000
 /** Maximum value that can be set for the PWM duty cycle, in timer ticks. */
-#define BDC_MCPWM_DUTY_TICK_MAX       (BDC_MCPWM_TIMER_RESOLUTION_HZ / BDC_MCPWM_FREQ_HZ)
+#define WHEEL_PWM_DUTY_TICK_MAX       (WHEEL_TIMER_RESOLUTION_HZ / WHEEL_PWM_FREQ_HZ)
 
 /* ============================================================================
  *                          MOTOR DRIVER GPIO PINS
  * ==========================================================================*/
 
 /** Left motor MCPWM output pin A. */
-#define BDC_LEFT_MCPWM_GPIO_A          GPIO_NUM_12
+#define WHEEL_LEFT_PWM_GPIO_A          GPIO_NUM_12
 /** Left motor MCPWM output pin B. */
-#define BDC_LEFT_MCPWM_GPIO_B          GPIO_NUM_13
+#define WHEEL_LEFT_PWM_GPIO_B          GPIO_NUM_13
 /** Right motor MCPWM output pin A. */
-#define BDC_RIGHT_MCPWM_GPIO_A         GPIO_NUM_11
+#define WHEEL_RIGHT_PWM_GPIO_A         GPIO_NUM_11
 /** Right motor MCPWM output pin B. */
-#define BDC_RIGHT_MCPWM_GPIO_B         GPIO_NUM_10
+#define WHEEL_RIGHT_PWM_GPIO_B         GPIO_NUM_10
+
+#define WHEEL_POWER_MAX WHEEL_PWM_DUTY_TICK_MAX
 
 /* ============================================================================
  *                          ENCODER GPIO PINS
  * ==========================================================================*/
 
 /** Left encoder quadrature channel A pin. */
-#define BDC_ENCODER_LEFT_GPIO_A        GPIO_NUM_7
+#define WHEEL_ENCODER_LEFT_GPIO_A        GPIO_NUM_7
 /** Left encoder quadrature channel B pin. */
-#define BDC_ENCODER_LEFT_GPIO_B        GPIO_NUM_6
+#define WHEEL_ENCODER_LEFT_GPIO_B        GPIO_NUM_6
 /** Right encoder quadrature channel A pin. */
-#define BDC_ENCODER_RIGHT_GPIO_A       GPIO_NUM_21
+#define WHEEL_ENCODER_RIGHT_GPIO_A       GPIO_NUM_21
 /** Right encoder quadrature channel B pin. */
-#define BDC_ENCODER_RIGHT_GPIO_B       GPIO_NUM_14
+#define WHEEL_ENCODER_RIGHT_GPIO_B       GPIO_NUM_14
 
 /* ============================================================================
  *                          ENCODER PCNT LIMITS
@@ -72,22 +73,17 @@
 /**
  * Upper pulse-count limit used by the PCNT unit.
  *
- * These limit values can be used to auto-reset the count and/or to raise
- * an interrupt when the limit is reached. Here they are irrelevant, since
- * neither auto-reset nor the watch-point interrupt is actually used.
+ * Maximum limits are critical for performance and driver validity:
+ *       - Driver Initialization: Mandatory requirement (high_limit > 0 and low_limit < 0).
+ *       - Internal ISR Overhead: When accum_count is enabled, reaching these thresholds 
+ *         dispatches an internal driver ISR to update the 64-bit accumulator. Maximizing 
+ *         the limits minimizes ISR trigger frequency, reducing CPU usage.
+ *       - Wrap-Around Prevention: Prevents premature hardware counter saturation between 
+ *         periodic polling cycles.
  */
-#define BDC_ENCODER_PCNT_HIGH_LIMIT   7000
-/** Lower pulse-count limit used by the PCNT unit (see #BDC_ENCODER_PCNT_HIGH_LIMIT). */
-#define BDC_ENCODER_PCNT_LOW_LIMIT    -7000
-
-/* ============================================================================
- *                          SPEED CONTROL (PID) PARAMETERS
- * ==========================================================================*/
-
-/** Speed control loop period: the motor speed is (re)computed at this rate, in ms. */
-#define BDC_PID_LOOP_PERIOD_MS        100
-/** Target motor speed, expressed in encoder pulses counted per control period. */
-#define BDC_PID_EXPECT_SPEED          400
+#define WHEEL_ENCODER_PCNT_HIGH_LIMIT   7000
+/** Lower pulse-count limit used by the PCNT unit (see #WHEEL_ENCODER_PCNT_HIGH_LIMIT). */
+#define WHEEL_ENCODER_PCNT_LOW_LIMIT    -WHEEL_ENCODER_PCNT_HIGH_LIMIT
 
 /* ============================================================================
  *                          ROBOT / WHEEL PHYSICAL PARAMETERS
@@ -99,16 +95,10 @@
 #define WHEELS_ENCODER_PPR 900
 /** Wheel radius, in meters (33 cm). */
 #define WHELL_RADIUS 0.033
-
-/** Maximum allowed PWM duty cycle value (currently the MCPWM tick resolution). */
-#define PWM_MAX BDC_MCPWM_DUTY_TICK_MAX
-
 /** ADC values from current sensor that brake the motors and the release value to motor to go on */
 #define WHEEL_STALL_LIMIT_VALUE  2500
 #define WHEEL_MOTOR_RELEASE_LIMIT_VALUE 1500
-
 #define WHEEL_MOTOR_STALL_TIME_VALUE 10
-
 #define WHEEL_POWER_TRACKER_TASK_BASE_PERIOD 200
 #define WHEEL_SPEED_CTRL_TASK_PERIOD 20 /*50 Hz*/
 
@@ -123,7 +113,6 @@
 typedef struct {
     bdc_motor_handle_t motor;          /**< Motor driver handle. */
     pcnt_unit_handle_t pcnt_encoder;   /**< Pulse counter unit handle for this motor's encoder. */
-    pid_ctrl_block_handle_t pid_ctrl;  /**< PID control block handle used for closed-loop speed control. */
     int report_pulses;                 /**< Last reported encoder pulse count. */
 } motor_control_context_t;
 
@@ -163,14 +152,43 @@ int wheel_Init( void );
 /**
  * @brief Set the raw direction and PWM duty cycle for both wheels.
  *
+ * The provided PWM values are clamped to the maximum allowed duty cycle,
+ * stored as the current command, and immediately applied to the motors.
+ * 
+ * @note To minimize overhead and latency, this function is not thread-safe.
+ *       Any concurrent access must be handled at the application level
+ *       (e.g., using a gatekeeper task or a mutex).
+ * 
+ * @note To control only one wheel, the caller must explicitly pass the current
+ *       state (direction and PWM) of the other wheel to preserve its operation.
+ *
  * @param dir_left  Desired direction for the left wheel.
  * @param pwm_left  Desired PWM duty cycle for the left wheel.
  * @param dir_right Desired direction for the right wheel.
  * @param pwm_right Desired PWM duty cycle for the right wheel.
  */
-void wheel_SetRawSpeed(
+void wheel_SetDutyCycle(
     wheel_dir_t dir_left, uint32_t pwm_left,
     wheel_dir_t dir_right, uint32_t pwm_right);
+
+/**
+ * @brief Set the power and direction for both wheels using signed power values.
+ *
+ * Positive values set the wheel direction to forward, while negative values set it to
+ * backward. The magnitude of the value represents the PWM duty cycle, which is clamped
+ * to the maximum allowed limit.
+ *
+ * @note To minimize overhead and latency, this function is not thread-safe.
+ *       Any concurrent access must be handled at the application level
+ *       (e.g., using a gatekeeper task or a mutex).
+ *
+ * @note To control only one wheel, the caller must explicitly pass the current
+ *       power value of the other wheel to preserve its operation.
+ *
+ * @param power_left  Signed power for left wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
+ * @param power_right Signed power for right wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
+ */
+void wheel_SetPower(int32_t power_left, int32_t power_right);
 
 /**
  * @brief Read the current motor power (raw ADC current readings).
