@@ -19,14 +19,26 @@ const static char *TAG = "wheels";
 
 portTASK_FUNCTION(wheel_ctrl, arg)
 {
-	wheel_Init();
-	//wheel_SetVel(WHEEL_PWM_DUTY_TICK_MAX, WHEEL_PWM_DUTY_TICK_MAX);
+  Wheel_Config_t minimal_wheel_cfg = {
+      .pwm_a_gpio = GPIO_NUM_12,
+      .pwm_b_gpio = GPIO_NUM_13,
+      .mcpwm_group_id = 0,
 
-	uint32_t power_left_wheel, power_right_wheel; 
+      /* Encoders desativados */
+      .encoder_a_gpio = GPIO_NUM_NC,
+      .encoder_b_gpio = GPIO_NUM_NC,
+
+      /* ADC desativado (demais parâmetros podem ficar omissos ou 0) */
+      .adc_handle = NULL,
+  };
+
+  Wheel_Handle_t wheel_basic = NULL;
+  ESP_ERROR_CHECK(Wheel_New(&minimal_wheel_cfg, &wheel_basic));
+
+
 
 	int dir = 0;
 	int count = 0;
-	int pL = 0, pR = 0;
 	while(1)
 	{
           if (count == 6) 
@@ -34,26 +46,17 @@ portTASK_FUNCTION(wheel_ctrl, arg)
 			  count = 0;
             if (dir == 0) 
             {
-              wheel_SetDutyCycle(WHEEL_FORWARD, WHEEL_PWM_DUTY_TICK_MAX, WHEEL_FORWARD, WHEEL_PWM_DUTY_TICK_MAX);
+                /* O motor funciona normalmente via PWM */
+              Wheel_SetPower(wheel_basic, WHEEL_PWM_DUTY_TICK_MAX);
               dir = 1;
             } 
             else 
             {
-              wheel_SetDutyCycle(WHEEL_REVERSE, WHEEL_PWM_DUTY_TICK_MAX, WHEEL_REVERSE, WHEEL_PWM_DUTY_TICK_MAX);
+              Wheel_SetPower(wheel_basic, -WHEEL_PWM_DUTY_TICK_MAX);
               dir = 0;
             }
           }
           
-          wheel_GetEndoderPulses(&pL, &pR);
-          //ESP_LOGI(TAG, "Left encoder: %d\tRight encoder: %d\r\n", pL, pR);
-          
-          
-          wheel_GetPower(&power_left_wheel, &power_right_wheel);
-          printf("Left ADC: %" PRIu32 "; \t Right ADC: %" PRIu32 ".\n", power_left_wheel, power_right_wheel);
-
-		  //printf("Left ADC: %d\n", adc_left_raw[1][0]);
-          
-          count++;
           vTaskDelay(pdMS_TO_TICKS(500));
 	}
 	

@@ -1,12 +1,15 @@
 /**
  * @file    wheel.h
- * @brief   Public interface of the differential drive wheel control module.
+ * @brief   PascalCase handle-based public interface for individual motorized wheel control.
  *
- * Declares the configuration macros, data types and public API used to
- * initialize and drive the left/right DC motors, read their quadrature
- * encoders and monitor their current consumption.
+ * Provides a modular API for controlling an individual motorized wheel assembly containing:
+ *  - Brushed DC (BDC) motor driven by MCPWM (Mandatory)
+ *  - Quadrature encoder decoded via Pulse Counter (PCNT) peripheral (Optional: set pins to GPIO_NUM_NC to disable)
+ *  - ADC channel for motor current sensing (Optional: set adc_handle to NULL to disable)
  *
- * @date    Jan 9, 2025
+ * All hardware parameters are dynamically configured per instance during creation via Wheel_Config_t.
+ *
+ * @date    Jan 2025
  * @author  Matheus
  */
 
@@ -14,196 +17,159 @@
 #define MAIN_WHEEL_H_
 
 #include <stdio.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
 #include "esp_log.h"
-#include "esp_timer.h"
+#include "esp_err.h"
 #include "driver/pulse_cnt.h"
 #include "bdc_motor.h"
 #include "hal/gpio_types.h"
 #include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
+#include "soc/pcnt_periph.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ============================================================================
- *                          MCPWM / PWM CONFIGURATION
+ *                       DEFAULT FALLBACK MACROS
  * ==========================================================================*/
 
-/** MCPWM timer resolution, in Hz (10 MHz -> 1 tick = 0.1 us). */
-#define WHEEL_TIMER_RESOLUTION_HZ 10000000
-/** PWM switching frequency applied to the motor drivers, in Hz. */
-#define WHEEL_PWM_FREQ_HZ             25000
+/** Default MCPWM timer resolution in Hz if unspecified (10 MHz = 0.1 us resolution). */
+#define WHEEL_TIMER_RESOLUTION_HZ   10000000
+
+/** Default PWM switching frequency in Hz if unspecified (25 kHz ultrasonic drive). */
+#define WHEEL_PWM_FREQ_HZ           25000
+
 /** Maximum value that can be set for the PWM duty cycle, in timer ticks. */
 #define WHEEL_PWM_DUTY_TICK_MAX       (WHEEL_TIMER_RESOLUTION_HZ / WHEEL_PWM_FREQ_HZ)
-
-/* ============================================================================
- *                          MOTOR DRIVER GPIO PINS
- * ==========================================================================*/
-
-/** Left motor MCPWM output pin A. */
-#define WHEEL_LEFT_PWM_GPIO_A          GPIO_NUM_12
-/** Left motor MCPWM output pin B. */
-#define WHEEL_LEFT_PWM_GPIO_B          GPIO_NUM_13
-/** Right motor MCPWM output pin A. */
-#define WHEEL_RIGHT_PWM_GPIO_A         GPIO_NUM_11
-/** Right motor MCPWM output pin B. */
-#define WHEEL_RIGHT_PWM_GPIO_B         GPIO_NUM_10
-
-#define WHEEL_POWER_MAX WHEEL_PWM_DUTY_TICK_MAX
-
-/* ============================================================================
- *                          ENCODER GPIO PINS
- * ==========================================================================*/
-
-/** Left encoder quadrature channel A pin. */
-#define WHEEL_ENCODER_LEFT_GPIO_A        GPIO_NUM_7
-/** Left encoder quadrature channel B pin. */
-#define WHEEL_ENCODER_LEFT_GPIO_B        GPIO_NUM_6
-/** Right encoder quadrature channel A pin. */
-#define WHEEL_ENCODER_RIGHT_GPIO_A       GPIO_NUM_21
-/** Right encoder quadrature channel B pin. */
-#define WHEEL_ENCODER_RIGHT_GPIO_B       GPIO_NUM_14
-
-/* ============================================================================
- *                          ENCODER PCNT LIMITS
- * ==========================================================================*/
-
-/**
- * Upper pulse-count limit used by the PCNT unit.
- *
- * Maximum limits are critical for performance and driver validity:
- *       - Driver Initialization: Mandatory requirement (high_limit > 0 and low_limit < 0).
- *       - Internal ISR Overhead: When accum_count is enabled, reaching these thresholds 
- *         dispatches an internal driver ISR to update the 64-bit accumulator. Maximizing 
- *         the limits minimizes ISR trigger frequency, reducing CPU usage.
- *       - Wrap-Around Prevention: Prevents premature hardware counter saturation between 
- *         periodic polling cycles.
- */
-#define WHEEL_ENCODER_PCNT_HIGH_LIMIT   7000
-/** Lower pulse-count limit used by the PCNT unit (see #WHEEL_ENCODER_PCNT_HIGH_LIMIT). */
-#define WHEEL_ENCODER_PCNT_LOW_LIMIT    -WHEEL_ENCODER_PCNT_HIGH_LIMIT
-
-/* ============================================================================
- *                          ROBOT / WHEEL PHYSICAL PARAMETERS
- * ==========================================================================*/
-
-/** Half of the robot's wheel axis length (track width), in cm. */
-#define WHEEL_AXIS_LENGHT_2 10
-/** Encoder pulses per revolution (PPR) of each wheel. */
-#define WHEELS_ENCODER_PPR 900
-/** Wheel radius, in meters (33 cm). */
-#define WHELL_RADIUS 0.033
-/** ADC values from current sensor that brake the motors and the release value to motor to go on */
-#define WHEEL_STALL_LIMIT_VALUE  2500
-#define WHEEL_MOTOR_RELEASE_LIMIT_VALUE 1500
-#define WHEEL_MOTOR_STALL_TIME_VALUE 10
-#define WHEEL_POWER_TRACKER_TASK_BASE_PERIOD 200
-#define WHEEL_SPEED_CTRL_TASK_PERIOD 20 /*50 Hz*/
-
 
 /* ============================================================================
  *                              DATA TYPES
  * ==========================================================================*/
 
 /**
- * @brief Aggregates the handles used to control and monitor a single motor.
+ * @brief Opaque handle representing an instantiated motorized wheel context.
  */
-typedef struct {
-    bdc_motor_handle_t motor;          /**< Motor driver handle. */
-    pcnt_unit_handle_t pcnt_encoder;   /**< Pulse counter unit handle for this motor's encoder. */
-    int report_pulses;                 /**< Last reported encoder pulse count. */
-} motor_control_context_t;
+typedef struct Wheel_t *Wheel_Handle_t;
 
 /**
- * @brief Rotation direction of a wheel.
+ * @brief Operational direction modes for an individual wheel.
  */
 typedef enum {
-    WHEEL_STOP = 0, /**< Wheel stopped/braked. */
-    WHEEL_FORWARD,  /**< Wheel spinning forward. */
-    WHEEL_REVERSE   /**< Wheel spinning in reverse. */
-} wheel_dir_t;
+    WHEEL_STOP = 0, /**< Motor braked / disabled. */
+    WHEEL_FORWARD,  /**< Motor driven in forward rotation. */
+    WHEEL_REVERSE   /**< Motor driven in reverse rotation. */
+} Wheel_Dir_t;
 
 /**
- * @brief Command describing the desired direction and PWM duty cycle for
- *        both wheels.
+ * @brief Configuration structure for initializing an individual wheel instance.
  */
 typedef struct {
-    wheel_dir_t dir_left;   /**< Desired direction for the left wheel. */
-    wheel_dir_t dir_right;  /**< Desired direction for the right wheel. */
-    uint32_t pwm_left;      /**< Desired PWM duty cycle for the left wheel. */
-    uint32_t pwm_right;     /**< Desired PWM duty cycle for the right wheel. */
-} wheel_cmd_t;
+    /* --- MCPWM Motor Driver Properties (Mandatory) --- */
+    gpio_num_t pwm_a_gpio;            /**< Primary MCPWM output GPIO pin. */
+    gpio_num_t pwm_b_gpio;            /**< Secondary MCPWM output GPIO pin. */
+    uint32_t mcpwm_group_id;          /**< MCPWM hardware group ID (0 or 1). */
+    uint32_t mcpwm_resolution_hz;     /**< Timer resolution in Hz (0 defaults to 10 MHz). */
+    uint32_t pwm_freq_hz;             /**< Switching frequency in Hz (0 defaults to 25 kHz). */
+    int32_t max_power_limit;          /**< Max power input magnitude allowed (0 defaults to max duty ticks). */
+
+    /* --- PCNT Quadrature Encoder Pins & Boundaries (Optional) --- */
+    gpio_num_t encoder_a_gpio;        /**< Quadrature Channel A GPIO pin (Set to GPIO_NUM_NC if unused). */
+    gpio_num_t encoder_b_gpio;        /**< Quadrature Channel B GPIO pin (Set to GPIO_NUM_NC if unused). */
+    int16_t pcnt_high_limit;          /**< Upper hardware counter bound (0 defaults to INT16_MAX). */
+    int16_t pcnt_low_limit;           /**< Lower hardware counter bound (0 defaults to INT16_MIN). */
+
+    /* --- ADC Current Sensing Properties (Optional) --- */
+    adc_oneshot_unit_handle_t adc_handle; /**< Pre-initialized ADC unit handle (NULL if unused). */
+    adc_channel_t adc_channel;        /**< ADC channel mapped to current sensor. */
+} Wheel_Config_t;
 
 /* ============================================================================
  *                              PUBLIC API
  * ==========================================================================*/
 
 /**
- * @brief Initialize the wheel subsystem (ADC, motors and encoders).
+ * @brief Instantiate and configure an individual motorized wheel instance.
  *
- * Must be called once before any other function in this module is used.
+ * Allocates internal context, configures custom MCPWM resolution and frequency,
+ * sets up optional PCNT quadrature decoding, and links optional ADC current sensing.
  *
- * @return int 1 on success (errors abort execution via ESP_ERROR_CHECK).
+ * @param[in]  config    Pointer to wheel configuration structure.
+ * @param[out] ret_wheel Pointer to store initialized wheel handle.
+ * @return esp_err_t     ESP_OK on success, or appropriate ESP-IDF driver error code.
  */
-int wheel_Init( void );
+esp_err_t Wheel_New(const Wheel_Config_t *config, Wheel_Handle_t *ret_wheel);
 
 /**
- * @brief Set the raw direction and PWM duty cycle for both wheels.
+ * @brief Set explicit rotation direction and raw PWM duty cycle ticks.
  *
- * The provided PWM values are clamped to the maximum allowed duty cycle,
- * stored as the current command, and immediately applied to the motors.
- * 
- * @note To minimize overhead and latency, this function is not thread-safe.
- *       Any concurrent access must be handled at the application level
- *       (e.g., using a gatekeeper task or a mutex).
- * 
- * @note To control only one wheel, the caller must explicitly pass the current
- *       state (direction and PWM) of the other wheel to preserve its operation.
+ * Values exceeding the instance's calculated max duty ticks are automatically clamped.
  *
- * @param dir_left  Desired direction for the left wheel.
- * @param pwm_left  Desired PWM duty cycle for the left wheel.
- * @param dir_right Desired direction for the right wheel.
- * @param pwm_right Desired PWM duty cycle for the right wheel.
+ * @param wheel    Target wheel handle.
+ * @param dir      Desired direction (WHEEL_FORWARD, WHEEL_REVERSE, or WHEEL_STOP).
+ * @param pwm_duty Duty cycle in timer ticks.
+ * @return esp_err_t ESP_OK on success, or ESP_ERR_INVALID_ARG if handle is NULL.
  */
-void wheel_SetDutyCycle(
-    wheel_dir_t dir_left, uint32_t pwm_left,
-    wheel_dir_t dir_right, uint32_t pwm_right);
+esp_err_t Wheel_SetDutyCycle(Wheel_Handle_t wheel, Wheel_Dir_t dir, uint32_t pwm_duty);
 
 /**
- * @brief Set the power and direction for both wheels using signed power values.
+ * @brief Set motor power and direction using a unified signed value.
  *
- * Positive values set the wheel direction to forward, while negative values set it to
- * backward. The magnitude of the value represents the PWM duty cycle, which is clamped
- * to the maximum allowed limit.
+ * Positive values select forward direction; negative values select reverse.
+ * Magnitude represents requested power bounded to [-max_power_limit, +max_power_limit].
  *
- * @note To minimize overhead and latency, this function is not thread-safe.
- *       Any concurrent access must be handled at the application level
- *       (e.g., using a gatekeeper task or a mutex).
- *
- * @note To control only one wheel, the caller must explicitly pass the current
- *       power value of the other wheel to preserve its operation.
- *
- * @param power_left  Signed power for left wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
- * @param power_right Signed power for right wheel (-WHEEL_POWER_MAX to WHEEL_POWER_MAX).
+ * @param wheel  Target wheel handle.
+ * @param power  Signed power command.
+ * @return esp_err_t ESP_OK on success, or ESP_ERR_INVALID_ARG if handle is NULL.
  */
-void wheel_SetPower(int32_t power_left, int32_t power_right);
+esp_err_t Wheel_SetPower(Wheel_Handle_t wheel, int32_t power);
 
 /**
- * @brief Read the current motor power (raw ADC current readings).
+ * @brief Actively brake the motor driver outputs.
  *
- * @param[out] pL Pointer where the left motor's raw ADC reading is stored.
- * @param[out] pR Pointer where the right motor's raw ADC reading is stored.
+ * @param wheel Target wheel handle.
+ * @return esp_err_t ESP_OK on success.
  */
-void wheel_GetPower( uint32_t *pL, uint32_t *pR );
+esp_err_t Wheel_Brake(Wheel_Handle_t wheel);
 
 /**
- * @brief Read the current encoder pulse counts for both wheels.
+ * @brief Read current pulse counter value accumulated from the quadrature encoder.
  *
- * @param[out] pL Pointer where the left encoder pulse count is stored.
- * @param[out] pR Pointer where the right encoder pulse count is stored.
+ * @param[in]  wheel     Target wheel handle.
+ * @param[out] out_count Pointer to store pulse count.
+ * @return esp_err_t     ESP_OK on success, or ESP_ERR_INVALID_STATE if encoder is disabled.
  */
-void wheel_GetEndoderPulses( int *pL, int *pR );
+esp_err_t Wheel_GetEncoderCount(Wheel_Handle_t wheel, int *out_count);
+
+/**
+ * @brief Reset the encoder accumulator count back to zero.
+ *
+ * @param wheel Target wheel handle.
+ * @return esp_err_t ESP_OK on success, or ESP_ERR_INVALID_STATE if encoder is disabled.
+ */
+esp_err_t Wheel_ClearEncoderCount(Wheel_Handle_t wheel);
+
+/**
+ * @brief Retrieve raw ADC current reading from motor sensor.
+ *
+ * @param[in]  wheel       Target wheel handle.
+ * @param[out] out_raw_adc Pointer to store raw ADC value.
+ * @return esp_err_t       ESP_OK on success, or ESP_ERR_INVALID_STATE if ADC is disabled.
+ */
+esp_err_t Wheel_GetCurrentRaw(Wheel_Handle_t wheel, int *out_raw_adc);
+
+/**
+ * @brief Destroy wheel instance and release allocated hardware and system resources.
+ *
+ * @param wheel Target wheel handle to delete.
+ * @return esp_err_t ESP_OK on success.
+ */
+esp_err_t Wheel_Del(Wheel_Handle_t wheel);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* MAIN_WHEEL_H_ */
