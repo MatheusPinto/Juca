@@ -26,7 +26,7 @@
 #include "ir_line_task.h"
 #include <inttypes.h>
 
-#define THREE_EYES_TASK
+//#define THREE_EYES_TASK
 //#define IMU_TASK
 #define WHEEL_CTRL_TASK
 //#define IR_LINE_TASK
@@ -52,7 +52,7 @@ void app_main(void)
 #endif
 
 #ifdef WHEEL_CTRL_TASK
-    xTaskCreate(wheel_ctrl,
+    xTaskCreate(WheelCtrl,
                 "wheel",
                 configMINIMAL_STACK_SIZE*3,
                 NULL,
