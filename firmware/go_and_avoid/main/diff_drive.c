@@ -30,7 +30,7 @@ typedef struct {
     wheelHandle_t left_wheel;          /**< Left motor driver abstraction handle. */
     wheelHandle_t right_wheel;         /**< Right motor driver abstraction handle. */
 
-    float track_width;                 /**< Lateral distance between drive wheel centers (L) in meters. */
+    float half_track_width;                 /**< Lateral distance between drive wheel centers (L) in meters. */
     float wheel_radius;                /**< Radius of drive wheels (r) in meters. */
     uint32_t encoder_cpr;              /**< Encoder pulses per single full revolution in 4x mode. */
 
@@ -152,13 +152,13 @@ esp_err_t DiffDrive_Init(const diffDriveConfig_t *config)
     ESP_RETURN_ON_FALSE(!s_ctx.is_initialized, ESP_ERR_INVALID_STATE, TAG, "Module is already initialized");
     ESP_RETURN_ON_FALSE(config, ESP_ERR_INVALID_ARG, TAG, "Null configuration pointer provided");
     ESP_RETURN_ON_FALSE(config->left_wheel && config->right_wheel, ESP_ERR_INVALID_ARG, TAG, "Wheel driver handles must not be NULL");
-    ESP_RETURN_ON_FALSE(config->track_width > 0.0f && config->wheel_radius > 0.0f, ESP_ERR_INVALID_ARG, TAG, "Physical robot dimensions must be > 0");
+    ESP_RETURN_ON_FALSE(config->half_track_width > 0.0f && config->wheel_radius > 0.0f, ESP_ERR_INVALID_ARG, TAG, "Physical robot dimensions must be > 0");
     ESP_RETURN_ON_FALSE(config->max_wheel_rad_s > 0.0f, ESP_ERR_INVALID_ARG, TAG, "Maximum wheel angular velocity must be > 0");
 
     /* Store geometric and performance parameters into global Singleton context */
     s_ctx.left_wheel = config->left_wheel;
     s_ctx.right_wheel = config->right_wheel;
-    s_ctx.track_width = config->track_width;
+    s_ctx.half_track_width = config->half_track_width;
     s_ctx.wheel_radius = config->wheel_radius;
     s_ctx.encoder_cpr = config->encoder_cpr;
     s_ctx.max_linear_velocity = config->max_linear_velocity;
@@ -386,8 +386,8 @@ esp_err_t DiffDrive_SetTwist(const diffDriveTwist_t *twist)
     }
 
     /* Inverse Kinematics Step 1: Calculate linear tangential velocities for left and right wheels (m/s) */
-    float v_left = linear_x - (angular_z * s_ctx.track_width / 2.0f);
-    float v_right = linear_x + (angular_z * s_ctx.track_width / 2.0f);
+    float v_left = linear_x - (angular_z * s_ctx.half_track_width);
+    float v_right = linear_x + (angular_z * s_ctx.half_track_width);
 
     /* Inverse Kinematics Step 2: Convert linear tangential speeds (m/s) into wheel rotational speeds (rad/s) */
     float omega_left = v_left / s_ctx.wheel_radius;
@@ -462,7 +462,7 @@ esp_err_t DiffDrive_GetTwist(float dt_seconds, diffDriveTwist_t *out_twist)
 
     /* Forward Kinematics Step 5: Solve differential forward kinematics equations for chassis twist */
     out_twist->linear_x = (v_right + v_left) / 2.0f;
-    out_twist->angular_z = (v_right - v_left) / s_ctx.track_width;
+    out_twist->angular_z = (v_right - v_left) / s_ctx.half_track_width;
 
     return ESP_OK;
 }

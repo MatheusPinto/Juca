@@ -127,14 +127,14 @@ portTASK_FUNCTION(DiffDriveCtrl, arg)
         .right_wheel = wheel_right,
         
         /* Physical vehicle parameters */
-        .track_width = 0.15f,               // Distance between wheels and the center of the robot: 15 cm
+        .half_track_width = 0.15f,               // Distance between wheels and the center of the robot: 15 cm
         .wheel_radius = 0.03f,              // Wheel radius: 3 cm
-        .encoder_cpr = 1000,                // Quadrature encoder CPR (4x mode)
+        .encoder_cpr = 900,                // Quadrature encoder CPR (4x mode)
         
         /* Operating speed limits */
         .max_linear_velocity = 0.8f,        // Max forward speed: 0.8 m/s
         .max_angular_velocity = 2.0f,       // Max turning rate: 2.0 rad/s
-        .max_wheel_rad_s = 20.0f,           // Default estimated max wheel speed in rad/s
+        .max_wheel_rad_s = 20.0f,           // Estimated max wheel speed in rad/s (It can be ignored if you apply wheels calibration later)
         
         /* Current safety task parameters */
         .max_adc_raw_threshold = 2500,      // Emergency ADC current threshold
@@ -151,7 +151,7 @@ portTASK_FUNCTION(DiffDriveCtrl, arg)
     vTaskDelay(pdMS_TO_TICKS(2000)); // Delay to allow safe placement before movement
 
     float measured_max_rad_s = 0.0f;
-    esp_err_t cal_err = DiffDrive_CalibrateMaxSpeed(1000, &measured_max_rad_s);
+    esp_err_t cal_err = DiffDrive_CalibrateMaxSpeed(4000, &measured_max_rad_s);
     if (cal_err == ESP_OK)
     {
         ESP_LOGI(TAG, "Auto-calibration successful! Max wheel speed: %.2f rad/s", measured_max_rad_s);

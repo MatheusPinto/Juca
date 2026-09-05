@@ -31,7 +31,7 @@
  * diffDriveConfig_t config = {
  *     .left_wheel = left_wheel_h,
  *     .right_wheel = right_wheel_h,
- *     .track_width = 0.25f,               // 25 cm track width
+ *     .half_track_width = 0.25f,               // 25 cm track width
  *     .wheel_radius = 0.04f,              // 4 cm wheel radius
  *     .encoder_cpr = 1440,                // 1440 CPR in 4x quadrature mode
  *     .max_linear_velocity = 1.0f,        // 1.0 m/s maximum speed
@@ -95,7 +95,7 @@ typedef struct {
     wheelHandle_t left_wheel;          /**< Opaque handle to the initialized left wheel driver instance. Must not be NULL. */
     wheelHandle_t right_wheel;         /**< Opaque handle to the initialized right wheel driver instance. Must not be NULL. */
 
-    float track_width;                 /**< Lateral distance between the centerlines of the left and right wheel ground contacts ($L$) in meters (m). Must be $> 0.0$. */
+    float half_track_width;                 /**< Lateral distance between the centerlines of the left and right wheel ground contacts ($L$) in meters (m). Must be $> 0.0$. */
     float wheel_radius;                /**< Effective rolling radius of the drive wheels ($r$) in meters (m). Must be $> 0.0$. */
     uint32_t encoder_cpr;              /**< Total counts per revolution (CPR) of the encoder in 4x quadrature mode. Set to 0 if encoders are physically absent. */
 

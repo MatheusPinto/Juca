@@ -221,3 +221,45 @@ portTASK_FUNCTION(WheelCtrl, arg)
     }
 }
 #endif
+
+#ifdef ENCODER_TEST_TASK
+portTASK_FUNCTION(WheelCtrl, arg)
+{
+
+    /* ----------------------------------------------------------------
+     * 1. Configure Wheel Instances
+     * ---------------------------------------------------------------- */
+    wheelConfig_t left_config = {
+        .pwm_a_gpio = MOTOR_LEFT_PWM_A,
+        .pwm_b_gpio = MOTOR_LEFT_PWM_B,
+        .mcpwm_group_id = 0,
+        .max_power_limit = 350,          /* Custom power scale: [-400 to +400] */
+        .encoder_a_gpio = ENCODER_LEFT_A,
+        .encoder_b_gpio = ENCODER_LEFT_B,
+    };
+
+    
+
+    wheelHandle_t wheel_left = NULL;
+
+    ESP_ERROR_CHECK(Wheel_Create(&left_config, &wheel_left));
+
+    ESP_LOGI(TAG, "Wheel instances created successfully.");
+
+    /* ----------------------------------------------------------------
+     * 2. Example Execution Loop
+     * ---------------------------------------------------------------- */
+
+    for ( ; ; ) 
+    {
+        int left_enc = 0;
+
+        /* Read telemetry from both wheels */
+        Wheel_GetEncoderCount(wheel_left, &left_enc);
+        
+        ESP_LOGI(TAG, "[FWD] Encoder count=%d", left_enc);
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+#endif

@@ -13,7 +13,8 @@
 #include "freertos/task.h"
 
 //#define SINGLE_BASIC_WHEEL_CTRL_TASK
-#define TWO_WHEELS_CTRL_TASK
+//#define TWO_WHEELS_CTRL_TASK
+#define ENCODER_TEST_TASK
 
 /**
  * @brief FreeRTOS task entry point for wheel control operations.
