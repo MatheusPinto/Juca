@@ -108,6 +108,13 @@ typedef struct {
     uint32_t monitor_period_ms;        /**< Sampling and evaluation interval for the safety task in milliseconds (e.g., 50 ms). */
     UBaseType_t safety_task_priority;  /**< FreeRTOS priority level assigned to the background safety monitoring task (e.g., 5). */
     uint32_t safety_task_stack_size;   /**< Memory stack depth in bytes allocated for the safety task (e.g., 3072 bytes). */
+
+    /* --- Periodic Motion Control Task Configuration --- */
+    float max_accel_linear;            /**< Maximum linear acceleration (m/s^2) enforced by the control task's rate limiter when ramping towards the commanded twist. Set to <= 0.0f to disable ramp limiting (instant application). */
+    float max_accel_angular;           /**< Maximum angular acceleration (rad/s^2) enforced by the control task's rate limiter. Set to <= 0.0f to disable ramp limiting (instant application). */
+    uint32_t control_period_ms;        /**< Execution period of the periodic motion control task in milliseconds. Set to 0 to use the default (20 ms / 50 Hz). */
+    UBaseType_t control_task_priority; /**< FreeRTOS priority level assigned to the periodic control task. MUST be strictly lower than @ref safety_task_priority whenever the safety task is enabled (`max_adc_raw_threshold > 0`); @ref DiffDrive_Init returns ESP_ERR_INVALID_ARG otherwise. Set to 0 to use the default (4). */
+    uint32_t control_task_stack_size;  /**< Memory stack depth in bytes allocated for the control task. Set to 0 to use the default (3072 bytes). */
 } diffDriveConfig_t;
 
 /* ============================================================================
@@ -176,24 +183,32 @@ esp_err_t DiffDrive_Deinit(void);
 esp_err_t DiffDrive_CalibrateMaxSpeed(uint32_t test_duration_ms, float *out_max_wheel_rad_s);
 
 /**
- * @brief Computes and applies motor duty cycles based on inverse differential kinematics.
+ * @brief Registers a target platform velocity vector ($v_x, \omega_z$) to be tracked by the periodic control task.
  *
- * @details Translates a target platform velocity vector ($v_x, \omega_z$) into PWM output signals using 
- *          the inverse kinematics equations:
- *          1. **Velocity Clamping**: Restricts $v_x$ and $\omega_z$ to limits defined in configuration.
- *          2. **Linear Wheel Speeds**:
+ * @details This function does NOT drive the motors directly. It validates the request, clamps 
+ *          $v_x$ and $\omega_z$ to the limits defined in configuration, and atomically stores the 
+ *          result as the new target twist. The background periodic control task (`diff_control_tsk`, 
+ *          started by @ref DiffDrive_Init) is solely responsible for ramping the currently applied 
+ *          twist towards this target (respecting `max_accel_linear` / `max_accel_angular`) and 
+ *          dispatching the resulting inverse-kinematics PWM values to the motor drivers on every cycle:
+ *          1. **Linear Wheel Speeds**:
  *             $$v_{\text{left}} = v_x - \frac{\omega_z \cdot L}{2}$$
  *             $$v_{\text{right}} = v_x + \frac{\omega_z \cdot L}{2}$$
- *          3. **Angular Speeds**:
+ *          2. **Angular Speeds**:
  *             $$\omega_{\text{left}} = \frac{v_{\text{left}}}{r}, \quad \omega_{\text{right}} = \frac{v_{\text{right}}}{r}$$
- *          4. **Trimmed PWM Scaling**:
+ *          3. **Trimmed PWM Scaling**:
  *             $$\text{Power}_{\text{left}} = \text{round}\left( \omega_{\text{left}} \cdot \text{Scale} \cdot \text{left\_trim\_factor} \right)$$
  *             $$\text{Power}_{\text{right}} = \text{round}\left( \omega_{\text{right}} \cdot \text{Scale} \cdot \text{right\_trim\_factor} \right)$$
+ *
+ * @note This function is fast, non-blocking, and safe to call from any FreeRTOS task at any rate 
+ *       (e.g., from a ROS/micro-ROS `cmd_vel` subscriber callback). It does not need to be called 
+ *       periodically; the control task will keep tracking the last registered target until a new 
+ *       one is set.
  *
  * @param[in] twist Pointer to a @ref diffDriveTwist_t structure containing target linear and angular velocities.
  * 
  * @return esp_err_t 
- *         - ESP_OK: Velocities successfully calculated and dispatched to motor drivers.
+ *         - ESP_OK: Target twist successfully validated and registered.
  *         - ESP_ERR_INVALID_STATE: Module not initialized or overcurrent fault state is active.
  *         - ESP_ERR_INVALID_ARG: Null pointer passed for `twist`.
  */
@@ -238,6 +253,11 @@ esp_err_t DiffDrive_Brake(void);
 /**
  * @brief Checks if an emergency fault (overcurrent/stall) is latching the system shut down.
  *
+ * @details This is a HARD LATCH: once tripped by `diff_safety_tsk`, it stays active -- and the 
+ *          periodic control task keeps the wheels at zero -- until @ref DiffDrive_ClearFault() is 
+ *          called explicitly. It never clears itself, even after the overcurrent/stall condition 
+ *          that originally caused it goes away.
+ *
  * @return true An emergency lockout is currently active. Motion commands will be rejected.
  * @return false Normal system state. Control commands are permitted.
  */
@@ -245,6 +265,16 @@ bool DiffDrive_IsFaultActive(void);
 
 /**
  * @brief Clears an active emergency lockout state, restoring normal motion command execution.
+ *
+ * @details The moment the fault latched, the previously registered target twist was discarded (reset 
+ *          to zero) -- so clearing the fault by itself will NOT make the platform resume its previous 
+ *          motion. Call @ref DiffDrive_SetTwist() again afterwards to command new motion. This is 
+ *          intentional: it prevents the platform from automatically driving back into whatever caused 
+ *          the stall the instant the fault is cleared.
+ *
+ * @warning Only call this after confirming it is actually safe to move again (e.g. the obstruction 
+ *          has been cleared). Calling it in a tight loop / immediately after every trip without 
+ *          addressing the underlying cause will simply cause the fault to re-trip repeatedly.
  *
  * @return esp_err_t 
  *         - ESP_OK: Fault flag cleared.
