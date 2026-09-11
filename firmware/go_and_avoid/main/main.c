@@ -81,4 +81,9 @@ void app_main(void)
                 5,
                 NULL);
 #endif
+
+for(;;){
+    vTaskSuspend(NULL);
+}
+
 }
