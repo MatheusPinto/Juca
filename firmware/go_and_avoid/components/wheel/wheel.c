@@ -41,10 +41,10 @@ struct wheel_t {
  * ==========================================================================*/
 
 /* Verifies that PCNT limits and PWM configuration parameters are mathematically valid at compile time. */
-static_assert(WHEEL_ENCODER_PCNT_HIGH_LIMIT > 0, "Encoder pulse overflow high limit must be bigger than zero!");
-static_assert(WHEEL_ENCODER_PCNT_LOW_LIMIT < 0, "Encoder pulse overflow low limit must be less than zero!");
-static_assert(WHEEL_TIMER_RESOLUTION_HZ > 0, "PWM timer resolution must be bigger than zero!");
-static_assert(WHEEL_PWM_FREQ_HZ > 0, "PWM frequency must be bigger than zero!");
+static_assert(CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT > 0, "Encoder pulse overflow high limit must be bigger than zero!");
+static_assert(CONFIG_WHEEL_ENCODER_PCNT_LOW_LIMIT < 0, "Encoder pulse overflow low limit must be less than zero!");
+static_assert(CONFIG_WHEEL_TIMER_RESOLUTION_HZ > 0, "PWM timer resolution must be bigger than zero!");
+static_assert(CONFIG_WHEEL_PWM_FREQ_HZ > 0, "PWM frequency must be bigger than zero!");
 
 /* ============================================================================
  *                     PRIVATE HELPER / INLINE FUNCTIONS
@@ -132,11 +132,11 @@ esp_err_t Wheel_Create(const wheelConfig_t *config, wheelHandle_t *ret_wheel)
     bdc_motor_config_t motor_config = {
         .pwma_gpio_num = config->pwm_a_gpio,
         .pwmb_gpio_num = config->pwm_b_gpio,
-        .pwm_freq_hz = WHEEL_PWM_FREQ_HZ,
+        .pwm_freq_hz = CONFIG_WHEEL_PWM_FREQ_HZ,
     };
     bdc_motor_mcpwm_config_t mcpwm_config = {
         .group_id = config->mcpwm_group_id,
-        .resolution_hz = WHEEL_TIMER_RESOLUTION_HZ,
+        .resolution_hz = CONFIG_WHEEL_TIMER_RESOLUTION_HZ,
     };
     /* Instantiate BDC motor device using MCPWM hardware peripheral */
     ESP_GOTO_ON_ERROR(bdc_motor_new_mcpwm_device(&motor_config, &mcpwm_config, &wheel->motor), 
@@ -153,8 +153,8 @@ esp_err_t Wheel_Create(const wheelConfig_t *config, wheelHandle_t *ret_wheel)
     {
         /* Configure PCNT hardware counting unit */
         pcnt_unit_config_t pcnt_config = {
-            .high_limit = WHEEL_ENCODER_PCNT_HIGH_LIMIT,
-            .low_limit = WHEEL_ENCODER_PCNT_LOW_LIMIT,
+            .high_limit = CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT,
+            .low_limit = CONFIG_WHEEL_ENCODER_PCNT_LOW_LIMIT,
             .flags.accum_count = true, /* Enables 64-bit hardware accumulator to prevent overflow pulse loss */
         };
         ESP_GOTO_ON_ERROR(pcnt_new_unit(&pcnt_config, &wheel->pcnt_unit), err, TAG, "Failed creating PCNT unit");

@@ -338,12 +338,7 @@ portTASK_FUNCTION(DiffDriveCtrl, arg)
 
     ESP_ERROR_CHECK(DiffDrive_SetTwist(&cmd_vel));
 
-    /* Restore normal system logging levels */
-    esp_log_level_set(TAG, ESP_LOG_INFO);
-    esp_log_level_set("diff_drive", ESP_LOG_INFO);
-    esp_log_level_set("wheel", ESP_LOG_INFO);
-
-    ESP_LOGI(TAG, "First valid command applied (Linear=%.3f, Angular=%.3f). Restoring log verbosity.",
+     ESP_LOGI(TAG, "First valid command applied (Linear=%.3f, Angular=%.3f). Restoring log verbosity.",
              cmd_vel.linear_x, cmd_vel.angular_z);
 
     diffDriveTwist_t estimated_vel = {0};

@@ -39,42 +39,20 @@ extern "C" {
  * ==========================================================================*/
 
 /** 
- * @brief MCPWM timer resolution in Hz (10 MHz = 0.1 us resolution per tick).
- */
-#define WHEEL_TIMER_RESOLUTION_HZ   10000000
-
-/** 
- * @brief Motor PWM switching frequency in Hz (25 kHz ultrasonic drive to eliminate audible noise).
- */
-#define WHEEL_PWM_FREQ_HZ           25000
-
-/** 
  * @brief Maximum PWM duty cycle value measured in timer ticks.
- * @details Calculated as (WHEEL_TIMER_RESOLUTION_HZ / WHEEL_PWM_FREQ_HZ).
+ * @details Calculated as (CONFIG_WHEEL_TIMER_RESOLUTION_HZ / CONFIG_WHEEL_PWM_FREQ_HZ).
  *          For 10 MHz / 25 kHz, the upper limit is 400 ticks.
  */
-#define WHEEL_PWM_DUTY_TICK_MAX       (WHEEL_TIMER_RESOLUTION_HZ / WHEEL_PWM_FREQ_HZ)
+#define WHEEL_PWM_DUTY_TICK_MAX       (CONFIG_WHEEL_TIMER_RESOLUTION_HZ / CONFIG_WHEEL_PWM_FREQ_HZ)
 
 /* ============================================================================
  *                     ENCODER PCNT LIMIT DEFINITIONS
  * ==========================================================================*/
 
-/**
- * @brief Upper pulse-count limit used by the PCNT hardware unit before wrapping.
- *
- * @details Maximizing PCNT limits is critical for performance and driver validity:
- *          - Driver Requirement: Mandatory requirement by ESP-IDF driver (high_limit > 0 and low_limit < 0).
- *          - ISR Overhead Reduction: When accum_count is enabled, reaching these thresholds 
- *            dispatches an internal driver ISR to update a 64-bit hardware accumulator. 
- *            Maximizing limits minimizes ISR trigger frequency, reducing CPU overhead.
- *          - Overflow Prevention: Prevents hardware 16-bit counter saturation between polling cycles.
- */
-#define WHEEL_ENCODER_PCNT_HIGH_LIMIT   7000
-
 /** 
- * @brief Lower pulse-count limit used by the PCNT hardware unit (Symmetric to #WHEEL_ENCODER_PCNT_HIGH_LIMIT).
+ * @brief Lower pulse-count limit used by the PCNT hardware unit (Symmetric to #CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT).
  */
-#define WHEEL_ENCODER_PCNT_LOW_LIMIT    -WHEEL_ENCODER_PCNT_HIGH_LIMIT
+#define CONFIG_WHEEL_ENCODER_PCNT_LOW_LIMIT    -CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT
 
 /* ============================================================================
  *                              DATA TYPES
