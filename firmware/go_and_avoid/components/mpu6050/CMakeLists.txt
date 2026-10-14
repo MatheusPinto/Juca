@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS 
+        "mpu6050.c"
+        "mpu6050init.c"
+    INCLUDE_DIRS 
+        "include"
+    REQUIRES 
+        driver  
+        log
+)
