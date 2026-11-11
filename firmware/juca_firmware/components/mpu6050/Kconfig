@@ -1,0 +1,73 @@
+menu "MPU6050 Driver"
+
+    config MPU6050_I2C_PORT
+        int "I2C port number"
+        range 0 1
+        default 0
+        help
+            I2C controller used to talk to the MPU6050.
+
+    config MPU6050_SDA_GPIO
+        int "SDA GPIO"
+        range 0 SOC_GPIO_OUT_RANGE_MAX
+        default 40
+        help
+            GPIO connected to the MPU6050 SDA line.
+
+    config MPU6050_SCL_GPIO
+        int "SCL GPIO"
+        range 0 SOC_GPIO_OUT_RANGE_MAX
+        default 39
+        help
+            GPIO connected to the MPU6050 SCL line.
+
+    config MPU6050_I2C_FREQ_HZ
+        int "I2C clock frequency (Hz)"
+        range 10000 400000
+        default 100000
+        help
+            I2C bus clock. The MPU6050 supports up to 400 kHz.
+
+    config MPU6050_I2C_INTERNAL_PULLUPS
+        bool "Enable internal pull-ups on SDA/SCL"
+        default y
+        help
+            Disable this if your board already has external pull-up
+            resistors (recommended for 400 kHz).
+
+    config MPU6050_I2C_TIMEOUT_MS
+        int "I2C transaction timeout (ms)"
+        range 10 10000
+        default 1000
+
+    choice MPU6050_ADDR_SELECT
+        prompt "I2C address (AD0 pin level)"
+        default MPU6050_ADDR_AD0_LOW
+        help
+            Selects the 7-bit I2C address according to the AD0 pin.
+
+        config MPU6050_ADDR_AD0_LOW
+            bool "AD0 low (0x68)"
+
+        config MPU6050_ADDR_AD0_HIGH
+            bool "AD0 high (0x69)"
+    endchoice
+
+    config MPU6050_BUILD_INIT_LAYER
+        bool "Build the board init layer (mpu6050init)"
+        default y
+        help
+            Builds mpu6050_complete_init(), which runs the full bring-up
+            (I2C, DMP load, calibration, DMP enable) using the pins above.
+            Disable it if you want to drive the low-level API yourself.
+
+    config MPU6050_CALIB_LOOPS
+        int "Calibration iterations (gyro and accel)"
+        depends on MPU6050_BUILD_INIT_LAYER
+        range 1 255
+        default 15
+        help
+            More iterations give better offsets but take longer.
+            The sensor must stay still during calibration.
+
+endmenu

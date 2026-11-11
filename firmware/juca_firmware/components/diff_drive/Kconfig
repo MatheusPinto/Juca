@@ -1,0 +1,101 @@
+menu "Differential Drive Configuration"
+
+    config DIFF_DRIVE_HALF_TRACK_WIDTH
+        int "Half track width (L/2) in meters 1000x"
+        default 125
+        help
+            Lateral distance from the robot center to the wheel ground contact point.
+
+    config DIFF_DRIVE_WHEEL_RADIUS
+        int "Wheel radius (r) in meters 1000x"
+        default 40
+        help
+            Effective rolling radius of the drive wheels.
+
+    config DIFF_DRIVE_ENCODER_CPR
+        int "Encoder counts per revolution (CPR) in 4x mode"
+        default 1440
+        range 0 100000
+        help
+            Total encoder resolution in 4x quadrature mode. Set to 0 if encoders are physically absent.
+
+    config DIFF_DRIVE_MAX_LINEAR_VELOCITY
+        int "Maximum linear velocity limit (m/s) 1000x"
+        default 1000
+        help
+            Software safety clamp for linear velocity. Set to 0 to disable speed clamping.
+
+    config DIFF_DRIVE_MAX_ANGULAR_VELOCITY
+        int "Maximum angular velocity limit (rad/s) 1000x"
+        default 3142
+        help
+            Software safety clamp for angular velocity. Set to 0 to disable speed clamping.
+
+    config DIFF_DRIVE_MAX_WHEEL_RAD_S
+        int "Theoretical maximum wheel angular velocity (rad/s) x1000"
+        default 25000
+        help
+            Maximum rotational speed reached by the motors at 100% PWM duty cycle.
+
+    menu "Safety and Overcurrent Protection"
+
+        config DIFF_DRIVE_MAX_ADC_RAW_THRESHOLD
+            int "ADC raw threshold limit for current cutoff"
+            default 2800
+            range 0 4095
+            help
+                Upper threshold limit for raw ADC readings. Set to 0 to disable the background monitoring task.
+
+        config DIFF_DRIVE_MONITOR_PERIOD_MS
+            int "Safety task monitor period (ms)"
+            default 50
+            help
+                Sampling and evaluation interval for the current monitoring safety task in milliseconds.
+
+        config DIFF_DRIVE_SAFETY_TASK_PRIORITY
+            int "Safety task FreeRTOS priority"
+            default 5
+            range 1 24
+            help
+                FreeRTOS task priority for the safety task. MUST be strictly higher than the control task priority.
+
+        config DIFF_DRIVE_SAFETY_STACK_SIZE
+            int "Safety task stack size (bytes)"
+            default 3072
+
+    endmenu
+
+    menu "Periodic Control Task and Acceleration Ramp"
+
+        config DIFF_DRIVE_MAX_ACCEL_LINEAR
+            int "Maximum linear acceleration (m/s^2) x1000"
+            default 1000
+            help
+                Linear acceleration rate limit for smooth motion ramping. Set <= 0 to disable ramping (instant response).
+
+        config DIFF_DRIVE_MAX_ACCEL_ANGULAR
+            int "Maximum angular acceleration (rad/s^2) x1000"
+            default 2000
+            help
+                Angular acceleration rate limit for smooth motion ramping. Set <= 0 to disable ramping.
+
+        config DIFF_DRIVE_CONTROL_PERIOD_MS
+            int "Control task execution period (ms)"
+            default 20
+            help
+                Execution cycle period for the periodic control loop in milliseconds (20 ms = 50 Hz).
+
+        config DIFF_DRIVE_CONTROL_TASK_PRIORITY
+            int "Control task FreeRTOS priority"
+            default 4
+            range 1 24
+            help
+                FreeRTOS task priority for the control task. MUST be strictly lower than the safety task priority.
+
+        config DIFF_DRIVE_CONTROL_STACK_SIZE
+            int "Control task stack size (bytes)"
+            default 3072
+
+    endmenu
+
+endmenu

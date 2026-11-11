@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS 
+        "wheel.c"
+    INCLUDE_DIRS 
+        "include"
+    REQUIRES 
+        driver 
+        esp_adc 
+        log
+        soc
+        bdc_motor
+)

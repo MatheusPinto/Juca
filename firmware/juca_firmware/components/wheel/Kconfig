@@ -1,0 +1,31 @@
+menu "Wheel Driver Configuration"
+
+    config WHEEL_TIMER_RESOLUTION_HZ
+        int "MCPWM Timer Resolution (Hz)"
+        default 10000000
+        help
+            MCPWM timer resolution in Hz (default: 10 MHz = 0.1 us per tick).
+
+    config WHEEL_PWM_FREQ_HZ
+        int "PWM Frequency (Hz)"
+        default 25000
+        help
+            Motor switching frequency (default: 25 kHz to avoid audible noise).
+
+    config WHEEL_ENCODER_PCNT_HIGH_LIMIT
+        int "PCNT High Limit Count"
+        default 7000
+        help
+            Maximum pulse count before overflow on the ESP32 PCNT peripheral.
+             Maximizing PCNT limits is critical for performance and driver validity:
+              - Driver Requirement: Mandatory requirement by ESP-IDF driver (high_limit > 0 and low_limit < 0).
+              - ISR Overhead Reduction: When accum_count is enabled, reaching these thresholds dispatches an internal driver ISR to update a 64-bit hardware accumulator. Maximizing limits minimizes ISR trigger frequency, reducing CPU overhead.
+              - Overflow Prevention: Prevents hardware 16-bit counter saturation between polling cycles.
+
+    config WHEEL_ENCODER_GLITCH_FILTER_NS
+        int "Encoder Glitch Filter (nanoseconds)"
+        default 1000
+        help
+            Maximum noise duration to be ignored on the encoder signal (in ns).
+
+endmenu
