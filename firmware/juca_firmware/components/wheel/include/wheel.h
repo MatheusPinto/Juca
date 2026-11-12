@@ -155,18 +155,6 @@ esp_err_t wheel_brake(wheel_handle_t wheel);
 esp_err_t wheel_get_encoder_count(wheel_handle_t wheel, int *out_count);
 
 /**
- * @brief Reset the encoder accumulator count back to zero.
- *
- * @param[in] wheel Target wheel handle.
- * 
- * @return esp_err_t 
- *         - ESP_OK: Count reset to zero successfully.
- *         - ESP_ERR_INVALID_ARG: Provided wheel handle is NULL.
- *         - ESP_ERR_INVALID_STATE: Encoder feature disabled on this wheel instance.
- */
-esp_err_t wheel_clear_encoder_count(wheel_handle_t wheel);
-
-/**
  * @brief Retrieve raw ADC current reading from motor sensor.
  *
  * @param[in]  wheel       Target wheel handle.

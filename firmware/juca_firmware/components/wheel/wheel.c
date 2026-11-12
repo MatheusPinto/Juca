@@ -255,20 +255,6 @@ esp_err_t wheel_get_encoder_count(wheel_handle_t wheel, int *out_count)
     return pcnt_unit_get_count(wheel->pcnt_unit, out_count);
 }
 
-esp_err_t wheel_clear_encoder_count(wheel_handle_t wheel)
-{
-    ESP_RETURN_ON_FALSE(wheel, ESP_ERR_INVALID_ARG, TAG, "Invalid wheel handle");
-
-    /* Safety guard: Return error if encoder feature is disabled on this instance */
-    if (!wheel->pcnt_unit) 
-    {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    /* Reset PCNT counter back to zero */
-    return pcnt_unit_clear_count(wheel->pcnt_unit);
-}
-
 esp_err_t wheel_get_current_raw(wheel_handle_t wheel, int *out_raw_adc)
 {
     ESP_RETURN_ON_FALSE(wheel && out_raw_adc, ESP_ERR_INVALID_ARG, TAG, "Invalid parameters");
