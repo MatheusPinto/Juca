@@ -157,12 +157,12 @@ esp_err_t wheel_create(const wheel_config_t *config, wheel_handle_t *out_wheel)
         pcnt_unit_config_t pcnt_config = {
             .high_limit = CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT,
             .low_limit = WHEEL_ENCODER_PCNT_LOW_LIMIT,
-            .flags.accum_count = true, /* Driver-side accumulator across limit overflows; needs the two watch points added below */
+            .flags.accum_count = true, /* Enables 64-bit hardware accumulator to prevent overflow pulse loss */
         };
         ESP_GOTO_ON_ERROR(pcnt_new_unit(&pcnt_config, &wheel->pcnt_unit), err, TAG, "Failed creating PCNT unit");
 
-        /* Configure glitch filter to ignore spurious noise pulses under 1000 ns (1 us) */
-        pcnt_glitch_filter_config_t filter_config = { .max_glitch_ns = 1000 };
+        /* Configure glitch filter to ignore spurious noise pulses shorter than CONFIG_WHEEL_ENCODER_GLITCH_FILTER_NS (default 1000 ns) */
+        pcnt_glitch_filter_config_t filter_config = { .max_glitch_ns = CONFIG_WHEEL_ENCODER_GLITCH_FILTER_NS };
         ESP_GOTO_ON_ERROR(pcnt_unit_set_glitch_filter(wheel->pcnt_unit, &filter_config), err, TAG, "Failed configuring glitch filter");
 
         /* --- Quadrature Decoding - Channel A (4x Mode) --- */
@@ -184,11 +184,6 @@ esp_err_t wheel_create(const wheel_config_t *config, wheel_handle_t *out_wheel)
         /* Define edge and level signal actions for Channel B */
         ESP_GOTO_ON_ERROR(pcnt_channel_set_edge_action(wheel->pcnt_channel_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE), err, TAG, "Edge action B failed");
         ESP_GOTO_ON_ERROR(pcnt_channel_set_level_action(wheel->pcnt_channel_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE), err, TAG, "Level action B failed");
-
-        /* Watch points at the counter limits: required for accum_count to work. Without them the hardware
-         * counter silently wraps to 0 at +/- the limit and those counts are lost. */
-        ESP_GOTO_ON_ERROR(pcnt_unit_add_watch_point(wheel->pcnt_unit, CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT), err, TAG, "Failed adding PCNT high-limit watch point");
-        ESP_GOTO_ON_ERROR(pcnt_unit_add_watch_point(wheel->pcnt_unit, WHEEL_ENCODER_PCNT_LOW_LIMIT), err, TAG, "Failed adding PCNT low-limit watch point");
 
         /* Enable, clear, and start hardware pulse counting */
         ESP_GOTO_ON_ERROR(pcnt_unit_enable(wheel->pcnt_unit), err, TAG, "Failed enabling PCNT unit");
