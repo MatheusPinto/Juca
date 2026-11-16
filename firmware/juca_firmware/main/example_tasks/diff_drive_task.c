@@ -31,7 +31,7 @@
  *     examples so that their log lines do not mix with the ones of this program.
  *  2. Put the robot on the floor with at least 2 meters of free path in front of it (or lift the wheels
  *     off the ground). The calibration in Step 4 makes both wheels spin at the maximum allowed duty
- *     (87.5% on the Juca, see `JUCA_MOTOR_MAX_POWER_TICKS`) for 4 seconds.
+ *     (87.5% with `JUCA_MOTOR_MAX_POWER_TICKS` of juca_platform.h) for 4 seconds.
  *  3. Build, flash and open the serial monitor. Wait for the calibration to finish. Then type a command
  *     and press ENTER. A command is two numbers separated by a space: "<linear_x> <angular_z>".
  *
@@ -113,10 +113,12 @@
 /* Our own components:
  *   diff_drive.h      -> the differential drive library (twist commands, odometry, safety)
  *   diff_drive_task.h -> the declaration of the task defined in this file
- *   juca_board.h      -> pins, ADC channels and physical constants of THIS robot (single source of truth) */
+ *   juca_board.h      -> pins, ADC channels and fixed parameters of the Juca board
+ *   juca_platform.h   -> chassis and motor parameters of the tested platform (they change with the hardware) */
 #include "diff_drive.h"
 #include "diff_drive_task.h"
 #include "juca_board.h"
+#include "juca_platform.h"
 
 /**
  * @brief Logging tag used across ESP-IDF system log macros.
@@ -126,7 +128,8 @@
  */
 static const char *TAG = "diff_drive_task";
 
-/* Pins, ADC channels and physical constants of the robot: see juca_board.h (single source of truth). */
+/* Pins, ADC channels and the current conversion factor of the board: see juca_board.h.
+ * Geometry, encoder resolution and motor power cap of the tested platform: see juca_platform.h. */
 
 /* ============================================================================
  *                    COMMUNICATION AND CONSOLE GLOBALS

@@ -226,7 +226,7 @@ All of them are in the `drive_config` structure of `diff_drive_ctrl_task()`.
 | `monitor_period_ms` | 50 | Period of the library safety task |
 | `diff_drive_calibrate_max_speed(4000, ...)` | 4000 ms | Duration of the calibration pulse (0.5 s to 10 s) |
 
-The physical constants of the robot (track width, wheel radius, encoder counts per turn, motor power cap and current conversion factor) are **not** here: they live in [`juca_board.h`](../juca_board.h) and are shared by all tasks.
+The chassis and motor parameters (track width, wheel radius, encoder counts per turn and motor power cap) are **not** here: they live in [`juca_platform.h`](../juca_platform.h). The pins and the current conversion factor are in [`juca_board.h`](../juca_board.h). Both headers are shared by all tasks.
 
 ## Troubleshooting
 

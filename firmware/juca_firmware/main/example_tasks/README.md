@@ -1,4 +1,4 @@
-# Test tasks
+# Example tasks
 
 Each file in this folder is a small, self-contained **example task** for the Juca robot (ESP32-S3, ESP-IDF v5.3.1). A task exercises **one piece of hardware** or **one component** from [`components/`](../../components), logs what it measures on the serial monitor, and nothing more.
 
@@ -21,7 +21,7 @@ Each task has its own README in this folder, with what it does, what to expect i
 | Ultrasonic sensors | [`threeeyes_task.c`](threeeyes_task.c) | `THREE_EYES_TASK` | 3 x HC-SR04 | [`threeeyes`](../../components/threeeyes) | No | [README_threeeyes.md](README_threeeyes.md) |
 | Line follower | [`ir_line_task.c`](ir_line_task.c) | `IR_LINE_TASK` | 5 infrared sensors | None (see [`ir_line.h`](../ir_line.h)) | No | [README_ir_line.md](README_ir_line.md) |
 
-Pins of the motors, encoders, current sensors and IMU are defined **once**, in [`juca_board.h`](../juca_board.h). The pins of the ultrasonic sensors are in [`threeeyes.h`](../../components/threeeyes/include/threeeyes.h) and those of the line follower in [`ir_line.h`](../ir_line.h).
+Pins of the motors, encoders, current sensors and IMU are defined **once**, in [`juca_board.h`](../juca_board.h), and the chassis and motor parameters of the tested platform in [`juca_platform.h`](../juca_platform.h). The pins of the ultrasonic sensors are in [`threeeyes.h`](../../components/threeeyes/include/threeeyes.h) and those of the line follower in [`ir_line.h`](../ir_line.h).
 
 ## How to use
 
@@ -70,7 +70,7 @@ If the board is not found automatically, add the serial port: `idf.py -p <PORT> 
 ## Adding a new task
 
 1. Create `<name>_task.c` and `<name>_task.h` in this folder. The header declares the entry function with `portTASK_FUNCTION(<name>_task, arg);`.
-2. Take pins and physical constants from [`juca_board.h`](../juca_board.h); do not hard-code GPIOs in the task.
+2. Take pins and board parameters from [`juca_board.h`](../juca_board.h), and chassis and motor parameters from [`juca_platform.h`](../juca_platform.h); do not hard-code GPIOs in the task.
 3. Add the `.c` file to `SRCS` in [`main/CMakeLists.txt`](../CMakeLists.txt) and, if the task needs a new component, to `REQUIRES`.
 4. In [`main.c`](../main.c), include the header, add a `//#define <NAME>_TASK` line and an `#ifdef` block that calls `xTaskCreate()`, like the existing ones.
 5. Create `README_<name>.md` in this folder and add a row to the table above.
