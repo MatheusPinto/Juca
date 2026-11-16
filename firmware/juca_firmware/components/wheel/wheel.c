@@ -161,6 +161,13 @@ esp_err_t wheel_create(const wheel_config_t *config, wheel_handle_t *out_wheel)
         };
         ESP_GOTO_ON_ERROR(pcnt_new_unit(&pcnt_config, &wheel->pcnt_unit), err, TAG, "Failed creating PCNT unit");
 
+        /* The hardware counter is only 16 bits and restarts from zero when it reaches a limit. The driver adds the limit to its
+         * accumulated total ONLY when the "limit reached" event fires, and that event is enabled by adding a watch point exactly at
+         * the limit value. Without these two calls accum_count does nothing and pcnt_unit_get_count() wraps every
+         * CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT counts (the wheel then looks one limit's worth of counts "behind" after each wrap). */
+        ESP_GOTO_ON_ERROR(pcnt_unit_add_watch_point(wheel->pcnt_unit, CONFIG_WHEEL_ENCODER_PCNT_HIGH_LIMIT), err, TAG, "Failed adding PCNT high-limit watch point");
+        ESP_GOTO_ON_ERROR(pcnt_unit_add_watch_point(wheel->pcnt_unit, WHEEL_ENCODER_PCNT_LOW_LIMIT), err, TAG, "Failed adding PCNT low-limit watch point");
+        
         /* Configure glitch filter to ignore spurious noise pulses shorter than CONFIG_WHEEL_ENCODER_GLITCH_FILTER_NS (default 1000 ns) */
         pcnt_glitch_filter_config_t filter_config = { .max_glitch_ns = CONFIG_WHEEL_ENCODER_GLITCH_FILTER_NS };
         ESP_GOTO_ON_ERROR(pcnt_unit_set_glitch_filter(wheel->pcnt_unit, &filter_config), err, TAG, "Failed configuring glitch filter");

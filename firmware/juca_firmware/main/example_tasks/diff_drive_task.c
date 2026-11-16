@@ -487,8 +487,8 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
 
         /* Software speed limits (a policy: "this robot must never go faster than this").
          * A command above them is reduced to the limit. 0 would disable the limit. */
-        .max_linear_velocity_m_s = 0.8f,
-        .max_angular_velocity_rad_s = 2.0f,
+        .max_linear_velocity_m_s =  0.0f,
+        .max_angular_velocity_rad_s = 0.0f,
         /* First estimate of how fast one wheel spins at 100% duty. It sets the scale "how many PWM ticks
          * for 1 rad/s". The calibration in Step 4 REPLACES it with the measured value. Until then it also
          * limits the top speed: 20 rad/s x 0.03 m x (350/400) is about 0.52 m/s. */
