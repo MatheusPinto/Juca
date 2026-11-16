@@ -25,18 +25,18 @@
 #include "ir_line_task.h"
 #include <inttypes.h>
 
-//#define THREE_EYES_TASK
+#define THREE_EYES_TASK
 //#define IMU_TASK
 //#define WHEEL_CTRL_TASK
 //#define IR_LINE_TASK
-#define DIFF_DRIVE_TASK
+//#define DIFF_DRIVE_TASK
 
 
 void app_main(void)
 {
 
 #ifdef THREE_EYES_TASK
-    xTaskCreate(Threeeyes,
+    xTaskCreate(threeeyes_task,
                 "threeeyes",
                 configMINIMAL_STACK_SIZE*3,
                 NULL,

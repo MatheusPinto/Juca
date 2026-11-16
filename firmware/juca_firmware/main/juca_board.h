@@ -11,15 +11,15 @@
  *          The parameters that depend on the motors, encoders, wheels and chassis fitted to the
  *          board (geometry, encoder resolution, motor power cap) are in @ref juca_platform.h.
  *
- *          Currently covers the motor driver, the encoder inputs, the current sensors and the IMU
- *          I2C bus. Still outside this file (they migrate together with their components): IR line
- *          follower (ir_line.h) and HC-SR04 (threeeyes.h).
+ *          Currently covers the motor driver, the encoder inputs, the current sensors, the IMU I2C bus
+ *          and the HC-SR04 ultrasonic sensors. Still outside this file (it migrates together with its
+ *          component): IR line follower (ir_line.h).
  *
  * @note    Components under components/ must NOT include this header (it would invert
  *          the dependency direction). They receive pins and constants through a configuration
  *          struct, as the wheel and diff_drive components do.
  *
- * @date    Oct 2026
+ * @date    Nov 2026
  * @author  Matheus Leitezke Pinto
  */
 
@@ -81,3 +81,18 @@
 #define JUCA_PIN_I2C_SDA                GPIO_NUM_40
 /** @brief I2C clock line (SCL) pin. */
 #define JUCA_PIN_I2C_SCL                GPIO_NUM_39
+
+/* ============================================================================
+ *                          HC-SR04 ULTRASONIC SENSORS (ThreeEyes)
+ * ==========================================================================*/
+
+/** @brief Trigger pin, shared by the three sensors. */
+#define JUCA_PIN_HCSR04_TRIG            GPIO_NUM_42
+/** @brief ECHO pin of the left sensor. */
+#define JUCA_PIN_HCSR04_ECHO_LEFT       GPIO_NUM_5
+/** @brief ECHO pin of the middle sensor. */
+#define JUCA_PIN_HCSR04_ECHO_MIDDLE     GPIO_NUM_4
+/** @brief ECHO pin of the right sensor. */
+#define JUCA_PIN_HCSR04_ECHO_RIGHT      GPIO_NUM_1
+/** @brief MCPWM group whose capture timer measures the echoes (the motors use the PWM timers of the same group). */
+#define JUCA_MCPWM_GROUP_HCSR04         0

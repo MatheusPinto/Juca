@@ -1,10 +1,10 @@
 idf_component_register(
     SRCS 
-       
+        "threeeyes.c"
     INCLUDE_DIRS 
         "include"
     REQUIRES 
-        driver 
-        esp_adc 
+        esp_driver_mcpwm
+        esp_driver_gpio
         log
 )

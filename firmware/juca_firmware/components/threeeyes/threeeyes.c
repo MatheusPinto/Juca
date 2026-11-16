@@ -1,177 +1,197 @@
 /**
  * @file    threeeyes.c
- * @brief   Implementation of the multiple ultrasonic sensor module (ThreeEyes).
- * @details This module controls 3 HC-SR04 ultrasonic sensors in parallel:
- *          - Generates a 10 us trigger pulse on a shared GPIO pin;
- *          - Measures individual return pulse widths (ECHO) using MCPWM capture channels;
- *          - Uses FreeRTOS task notifications to signal measurement completion from ISR.
+ * @brief   Implementation of the ThreeEyes component (three HC-SR04 sensors on MCPWM capture).
  *
- * @date    2025
- * @author  Matheus
+ * @details How one measurement works:
+ *          1. The task sends a 10 us pulse on the shared trigger pin.
+ *          2. Each sensor emits its ultrasonic burst and raises its ECHO pin; the capture channel stores
+ *             the timer value of that rising edge (in the interrupt, see @ref echo_edge_callback).
+ *          3. When the sound comes back (or after about 38 ms if nothing is in range) the sensor lowers
+ *             ECHO; the interrupt computes the pulse width and notifies the waiting task.
+ *          4. The task wakes up on the first notification and records which sensors have answered.
+ *
+ * @date    Nov 2026
+ * @author  Matheus Leitezke Pinto
  */
 
 #include "threeeyes.h"
-#include "freertos/semphr.h"
-#include <inttypes.h>
+#include "freertos/task.h"
+#include "driver/mcpwm_cap.h"
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+#include "esp_check.h"
+#include "esp_log.h"
+
+/** @brief Logging tag used across ESP-IDF system log macros. */
+static const char *TAG = "threeeyes";
+
+/** @brief Number of sensors handled by this component. */
+#define THREEEYES_SENSOR_COUNT    3
+
+/** @brief Width of the trigger pulse, in microseconds (the HC-SR04 needs at least 10 us). */
+#define THREEEYES_TRIG_PULSE_US   10
+
+/** @brief Index of each sensor in #s_sensors. Bit `1 << index` is its task notification bit. */
+enum {
+    THREEEYES_INDEX_LEFT = 0,
+    THREEEYES_INDEX_MIDDLE = 1,
+    THREEEYES_INDEX_RIGHT = 2,
+};
 
 /**
- * @brief Tag used for ESP32 logging outputs (ESP_LOG*).
+ * @brief Runtime context of one sensor.
  */
-const static char *TAG = "TreeEyes";
+typedef struct {
+    mcpwm_cap_channel_handle_t channel;  /**< Capture channel of the ECHO pin (NULL if not created). */
+    bool is_enabled;                     /**< true while the capture channel is enabled. */
+    volatile uint32_t start_ticks;       /**< Timer value at the rising edge of ECHO. Written by the interrupt. */
+    volatile uint32_t tof_ticks;         /**< Width of the last echo pulse, in timer ticks. Written by the interrupt. */
+    bool is_updated;                     /**< Result flag of the last trigger. Written by the task only. */
+} threeeyes_sensor_t;
+
+/** @brief The three sensors, in the order left, middle, right. */
+static threeeyes_sensor_t s_sensors[THREEEYES_SENSOR_COUNT];
+
+/** @brief Capture timer shared by the three channels (NULL before @ref threeeyes_init). */
+static mcpwm_cap_timer_handle_t s_cap_timer = NULL;
+
+/** @brief Capture timer resolution in Hz (ticks per second), read from the driver at init. */
+static uint32_t s_timer_resolution_hz = 0;
+
+/** @brief Trigger pin, copied from the configuration. */
+static gpio_num_t s_trig_gpio = GPIO_NUM_NC;
+
+/** @brief true after a successful @ref threeeyes_init. */
+static bool s_is_initialized = false;
 
 /**
- * @brief Array containing context structures for the 3 ultrasonic sensors (Left, Middle, Right).
+ * @brief Task waiting for echoes, or NULL when nobody waits.
+ *
+ * @details The interrupt only notifies while this is set, so an echo that ends after the task stopped
+ *          waiting does not leave a notification behind.
  */
-volatile ultrasonic_sensor_t sensors[3];
-
-/**
- * @brief Handle of the task that requested measurement and should receive notifications from ISR.
- */
-static volatile TaskHandle_t actualTaskHandle;
+static volatile TaskHandle_t s_waiting_task_handle = NULL;
 
 /* ============================================================================
  *                      INTERRUPT CALLBACK FUNCTION (ISR)
  * ==========================================================================*/
 
 /**
- * @brief MCPWM capture event callback triggered on edges of the ECHO pin.
- * @details On rising edge (POS edge), stores the initial timestamp. 
- *          On falling edge (NEG edge), calculates Time-of-Flight (tof_ticks) and 
- *          notifies the receiving task via `xTaskNotifyFromISR()`.
+ * @brief Called by the MCPWM driver, in interrupt context, on every edge of an ECHO pin.
  *
- * @param[in] cap_chan  Handle of the capture channel that generated the event.
- * @param[in] edata     Pointer to event data structure (edge type and counter value).
- * @param[in] user_data User pointer corresponding to the sensor's @ref ultrasonic_sensor_t structure.
- * @return true If a higher priority task wake-up (context switch) is required.
- * @return false Otherwise.
+ * @details Rising edge: store the start time. Falling edge: compute the pulse width and notify the
+ *          waiting task with this sensor's bit. The unsigned subtraction stays correct when the 32-bit
+ *          timer wraps around between the two edges.
+ *
+ * @param[in] cap_chan  Capture channel that generated the event (unused).
+ * @param[in] edata     Edge type and captured timer value.
+ * @param[in] user_data The sensor index (0 to 2), passed as a pointer-sized integer.
+ * @return true if a higher-priority task was woken and a context switch is needed.
  */
-static bool hc_sr04_echo_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm_capture_event_data_t *edata, void *user_data)
+static bool echo_edge_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm_capture_event_data_t *edata, void *user_data)
 {
-    ultrasonic_sensor_t *sensor = (ultrasonic_sensor_t *)user_data;
+    (void)cap_chan;
+    const uint32_t sensor_index = (uint32_t)(uintptr_t)user_data;
+    threeeyes_sensor_t *sensor = &s_sensors[sensor_index];
 
     if (edata->cap_edge == MCPWM_CAP_EDGE_POS)
     {
-        /* Rising edge: Start of ECHO pulse */
-        sensor->start_time = edata->cap_value;
-    } 
-    else if (edata->cap_edge == MCPWM_CAP_EDGE_NEG)
-    {
-        /* Falling edge: End of ECHO pulse */
-        uint32_t end_time = edata->cap_value;
-        sensor->value.tof_ticks = end_time - sensor->start_time;
-
-        /* Notify task waiting for reading */
-        BaseType_t high_task_wakeup = pdFALSE;
-        if (actualTaskHandle != NULL)
-        {
-            xTaskNotifyFromISR(actualTaskHandle, sensor->notify_bit, eSetBits, &high_task_wakeup);
-            return high_task_wakeup == pdTRUE;
-        }
+        sensor->start_ticks = edata->cap_value;
+        return false;
     }
 
-    return false;
+    sensor->tof_ticks = edata->cap_value - sensor->start_ticks;
+
+    BaseType_t is_higher_priority_task_woken = pdFALSE;
+    TaskHandle_t waiting_task_handle = s_waiting_task_handle;
+    if (waiting_task_handle != NULL)
+    {
+        xTaskNotifyFromISR(waiting_task_handle, 1UL << sensor_index, eSetBits, &is_higher_priority_task_woken);
+    }
+    return is_higher_priority_task_woken == pdTRUE;
 }
 
 /* ============================================================================
- *                              PUBLIC API
+ *                     PRIVATE HELPER FUNCTIONS
  * ==========================================================================*/
 
 /**
- * @brief Triggers the TRIG pulse and blocks the calling task until ECHO reception or timeout.
- * @details Performs the following sequence:
- *          1. Saves current task handle into @ref actualTaskHandle;
- *          2. Clears pending notifications on the task;
- *          3. Outputs a high pulse on the TRIG pin for 10 us;
- *          4. Waits for notification bits from sensors via `xTaskNotifyWait()`;
- *          5. Updates the `isUpdated` flag for each sensor.
+ * @brief Releases everything @ref threeeyes_init may have created (used as its rollback).
  *
- * @param[in] xTicksToWait Maximum wait time in ticks.
+ * @param[in] is_timer_enabled true if the capture timer was already enabled.
  */
-void ThreeEyes_TrigAndWait( TickType_t xTicksToWait )
+static void release_resources(bool is_timer_enabled)
 {
-    actualTaskHandle = xTaskGetCurrentTaskHandle();
-    
-    /* 1. Clear any old notification before starting */
-    ulTaskNotifyValueClear(NULL, 0xFFFFFFFF);
-
-    /* 2. Trigger 10-microsecond TRIG pulse */
-    gpio_set_level(HC_SR04_TRIG_GPIO, 1);
-    esp_rom_delay_us(10); 
-    gpio_set_level(HC_SR04_TRIG_GPIO, 0);
-
-    uint32_t notifiedBits = 0;
-    
-    /* 3. Wait for notifications coming from ISR */
-    if (xTaskNotifyWait(0x00, 0xFFFFFFFF, &notifiedBits, xTicksToWait) == pdTRUE) 
+    for (int i = 0; i < THREEEYES_SENSOR_COUNT; i++)
     {
-        if (notifiedBits == 0) {
-            printf("WARNING: Woke up but notification bits were ZERO!\n");
+        if (s_sensors[i].channel != NULL)
+        {
+            if (s_sensors[i].is_enabled)
+            {
+                mcpwm_capture_channel_disable(s_sensors[i].channel);
+            }
+            mcpwm_del_capture_channel(s_sensors[i].channel);
         }
-        /* 4. Map which sensors responded within time */
-        sensors[0].value.isUpdated = (notifiedBits & NOTIFY_BIT_LEFT_SENSOR)   ? pdTRUE : pdFALSE;
-        sensors[1].value.isUpdated = (notifiedBits & NOTIFY_BIT_MIDDLE_SENSOR) ? pdTRUE : pdFALSE;
-        sensors[2].value.isUpdated = (notifiedBits & NOTIFY_BIT_RIGHT_SENSOR)  ? pdTRUE : pdFALSE;
+        s_sensors[i] = (threeeyes_sensor_t){0};
     }
-    else {
-        printf("ERROR: Timed out even with portMAX_DELAY (This should not happen!)\n");
-    }
-    actualTaskHandle = NULL;
-}
 
-/**
- * @brief Retrieves the measured Time-of-Flight values and update flags for all sensors.
- *
- * @param[out] left   Pointer for copying left sensor reading.
- * @param[out] middle Pointer for copying middle sensor reading.
- * @param[out] right  Pointer for copying right sensor reading.
- */
-void ThreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right)
-{
-    left->tof_ticks = sensors[0].value.tof_ticks;
-    left->isUpdated = sensors[0].value.isUpdated;
-
-    middle->tof_ticks = sensors[1].value.tof_ticks;
-    middle->isUpdated = sensors[1].value.isUpdated;
-
-    right->tof_ticks = sensors[2].value.tof_ticks;
-    right->isUpdated = sensors[2].value.isUpdated;
-}
-
-/**
- * @brief Initializes trigger GPIO pin and MCPWM capture peripheral for 3 sensors.
- */
-void ThreeEyes_Init( void )
-{
-    ESP_LOGI(TAG, "Configuring Capture Timer");
-    mcpwm_cap_timer_handle_t cap_timer = NULL;
-    mcpwm_capture_timer_config_t cap_timer_config = {
-        .clk_src = MCPWM_CAPTURE_CLK_SRC_DEFAULT,
-        .group_id = 0,
-    };
-    ESP_ERROR_CHECK(mcpwm_new_capture_timer(&cap_timer_config, &cap_timer));
-
-    ESP_LOGI(TAG, "Configuring TRIG pin");
-    gpio_config_t trig_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << HC_SR04_TRIG_GPIO,
-    };
-    ESP_ERROR_CHECK(gpio_config(&trig_config));
-    ESP_ERROR_CHECK(gpio_set_level(HC_SR04_TRIG_GPIO, 0));
-
-    ESP_LOGI(TAG, "Starting Capture Timer");
-    ESP_ERROR_CHECK(mcpwm_capture_timer_enable(cap_timer));
-    ESP_ERROR_CHECK(mcpwm_capture_timer_start(cap_timer));
-
-    gpio_num_t echo_gpios[3] = {HC_SR04_ECHO_GPIO_LEFT, HC_SR04_ECHO_GPIO_MIDDLE, HC_SR04_ECHO_GPIO_RIGHT};
-
-    sensors[0].notify_bit = NOTIFY_BIT_LEFT_SENSOR;
-    sensors[1].notify_bit = NOTIFY_BIT_MIDDLE_SENSOR;
-    sensors[2].notify_bit = NOTIFY_BIT_RIGHT_SENSOR;
-
-    for (int i = 0; i < 3; i++) 
+    if (s_cap_timer != NULL)
     {
-        ESP_LOGI(TAG, "Configuring capture channel for Sensor %d", i + 1);
+        if (is_timer_enabled)
+        {
+            mcpwm_capture_timer_disable(s_cap_timer);
+        }
+        mcpwm_del_capture_timer(s_cap_timer);
+        s_cap_timer = NULL;
+    }
+}
 
+/**
+ * @brief Disables the capture channel of one sensor.
+ *
+ * @param[in] sensor_index Index in #s_sensors.
+ * @return esp_err_t ESP_OK, ESP_ERR_INVALID_STATE, or an MCPWM driver error.
+ */
+static esp_err_t disable_sensor(int sensor_index)
+{
+    ESP_RETURN_ON_FALSE(s_is_initialized, ESP_ERR_INVALID_STATE, TAG, "Not initialized");
+    ESP_RETURN_ON_FALSE(s_sensors[sensor_index].is_enabled, ESP_ERR_INVALID_STATE, TAG, "Sensor %d is already disabled", sensor_index);
+    ESP_RETURN_ON_ERROR(mcpwm_capture_channel_disable(s_sensors[sensor_index].channel), TAG, "Failed to disable sensor %d", sensor_index);
+
+    s_sensors[sensor_index].is_enabled = false;
+    s_sensors[sensor_index].is_updated = false;
+    return ESP_OK;
+}
+
+/* ============================================================================
+ *                         PUBLIC API IMPLEMENTATION
+ * ==========================================================================*/
+
+esp_err_t threeeyes_init(const threeeyes_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(config, ESP_ERR_INVALID_ARG, TAG, "Null configuration pointer provided");
+    ESP_RETURN_ON_FALSE(!s_is_initialized, ESP_ERR_INVALID_STATE, TAG, "Already initialized");
+
+    esp_err_t ret = ESP_OK; /* Used by the ESP_GOTO_ON_ERROR macro */
+    bool is_timer_enabled = false;
+    const gpio_num_t echo_gpios[THREEEYES_SENSOR_COUNT] = {
+        [THREEEYES_INDEX_LEFT] = config->echo_left_gpio,
+        [THREEEYES_INDEX_MIDDLE] = config->echo_middle_gpio,
+        [THREEEYES_INDEX_RIGHT] = config->echo_right_gpio,
+    };
+
+    /* 1. Capture timer: a free-running 32-bit counter that the channels sample on each edge. */
+    mcpwm_capture_timer_config_t timer_config = {
+        .clk_src = MCPWM_CAPTURE_CLK_SRC_DEFAULT,
+        .group_id = config->mcpwm_group_id,
+    };
+    ESP_GOTO_ON_ERROR(mcpwm_new_capture_timer(&timer_config, &s_cap_timer), err, TAG, "Failed to create the capture timer");
+    ESP_GOTO_ON_ERROR(mcpwm_capture_timer_get_resolution(s_cap_timer, &s_timer_resolution_hz), err, TAG, "Failed to read the timer resolution");
+
+    /* 2. One capture channel per ECHO pin, on both edges. The callback must be registered BEFORE the
+     *    channel is enabled (requirement of the MCPWM driver). */
+    for (int i = 0; i < THREEEYES_SENSOR_COUNT; i++)
+    {
         mcpwm_capture_channel_config_t channel_config = {
             .gpio_num = echo_gpios[i],
             .prescale = 1,
@@ -179,46 +199,107 @@ void ThreeEyes_Init( void )
             .flags.pos_edge = true,
             .flags.pull_up = false,
         };
-
-        ESP_ERROR_CHECK(mcpwm_new_capture_channel(cap_timer, &channel_config, &sensors[i].channel));
+        ESP_GOTO_ON_ERROR(mcpwm_new_capture_channel(s_cap_timer, &channel_config, &s_sensors[i].channel), err, TAG, "Failed to create the capture channel of sensor %d", i);
 
         mcpwm_capture_event_callbacks_t callbacks = {
-            .on_cap = hc_sr04_echo_callback,
+            .on_cap = echo_edge_callback,
         };
-
-        ESP_LOGI(TAG, "Registering callback for Sensor %d", i + 1);
-        ESP_ERROR_CHECK(mcpwm_capture_channel_register_event_callbacks(sensors[i].channel, &callbacks, &sensors[i]));
-
-        ESP_LOGI(TAG, "Enabling capture channel for Sensor %d", i + 1);
-        ESP_ERROR_CHECK(mcpwm_capture_channel_enable(sensors[i].channel));
-        sensors[i].echo_gpio_num = echo_gpios[i];
-        sensors[i].value.isUpdated = pdFALSE;
+        ESP_GOTO_ON_ERROR(mcpwm_capture_channel_register_event_callbacks(s_sensors[i].channel, &callbacks, (void *)(uintptr_t)i), err, TAG, "Failed to register the callback of sensor %d", i);
+        ESP_GOTO_ON_ERROR(mcpwm_capture_channel_enable(s_sensors[i].channel), err, TAG, "Failed to enable the capture channel of sensor %d", i);
+        s_sensors[i].is_enabled = true;
     }
+
+    /* 3. Trigger pin: output, idle low. */
+    gpio_config_t trig_config = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << config->trig_gpio,
+    };
+    ESP_GOTO_ON_ERROR(gpio_config(&trig_config), err, TAG, "Failed to configure the trigger pin");
+    ESP_GOTO_ON_ERROR(gpio_set_level(config->trig_gpio, 0), err, TAG, "Failed to set the trigger pin low");
+    s_trig_gpio = config->trig_gpio;
+
+    /* 4. Start counting. */
+    ESP_GOTO_ON_ERROR(mcpwm_capture_timer_enable(s_cap_timer), err, TAG, "Failed to enable the capture timer");
+    is_timer_enabled = true;
+    ESP_GOTO_ON_ERROR(mcpwm_capture_timer_start(s_cap_timer), err, TAG, "Failed to start the capture timer");
+
+    s_is_initialized = true;
+    ESP_LOGI(TAG, "Initialized (capture timer at %lu Hz).", (unsigned long)s_timer_resolution_hz);
+    return ESP_OK;
+
+err:
+    release_resources(is_timer_enabled);
+    return ret;
 }
 
-/**
- * @brief Disables capture channel for the left sensor.
- */
-void ThreeEyes_DisableLeft(void)
+esp_err_t threeeyes_trigger_and_wait(TickType_t timeout_ticks)
 {
-    ESP_LOGI(TAG, "Disabling capture channel for Left Sensor");
-    ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[0].channel));
+    ESP_RETURN_ON_FALSE(s_is_initialized, ESP_ERR_INVALID_STATE, TAG, "Not initialized");
+
+    /* Start from a clean notification: clear BOTH the pending state and the value. Clearing only the
+     * value is not enough: an echo of the previous trigger that ended after the previous wait returned
+     * would leave the notification "pending", and the wait below would then return at once with no bits. */
+    xTaskNotifyStateClear(NULL);
+    ulTaskNotifyValueClear(NULL, UINT32_MAX);
+    s_waiting_task_handle = xTaskGetCurrentTaskHandle();
+
+    /* Trigger pulse. The busy-wait is intentional: 10 us is far below one RTOS tick. */
+    gpio_set_level(s_trig_gpio, 1);
+    esp_rom_delay_us(THREEEYES_TRIG_PULSE_US);
+    gpio_set_level(s_trig_gpio, 0);
+
+    /* Sleep until the interrupt reports the first echo (or the timeout expires). */
+    uint32_t notified_bits = 0;
+    BaseType_t is_notified = xTaskNotifyWait(0, UINT32_MAX, &notified_bits, timeout_ticks);
+    s_waiting_task_handle = NULL;
+
+    /* On a timeout notified_bits is 0, so every flag is cleared: no stale result survives. */
+    for (int i = 0; i < THREEEYES_SENSOR_COUNT; i++)
+    {
+        s_sensors[i].is_updated = (notified_bits & (1UL << i)) != 0;
+    }
+
+    return (is_notified == pdTRUE && notified_bits != 0) ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
-/**
- * @brief Disables capture channel for the middle sensor.
- */
-void ThreeEyes_DisableMiddle(void)
+esp_err_t threeeyes_read_values(threeeyes_value_t *left, threeeyes_value_t *middle, threeeyes_value_t *right)
 {
-    ESP_LOGI(TAG, "Disabling capture channel for Middle Sensor");
-    ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[1].channel));
+    ESP_RETURN_ON_FALSE(left && middle && right, ESP_ERR_INVALID_ARG, TAG, "Output pointer is NULL");
+
+    threeeyes_value_t *const outputs[THREEEYES_SENSOR_COUNT] = {
+        [THREEEYES_INDEX_LEFT] = left,
+        [THREEEYES_INDEX_MIDDLE] = middle,
+        [THREEEYES_INDEX_RIGHT] = right,
+    };
+    for (int i = 0; i < THREEEYES_SENSOR_COUNT; i++)
+    {
+        outputs[i]->tof_ticks = s_sensors[i].tof_ticks;
+        outputs[i]->is_updated = s_sensors[i].is_updated;
+    }
+    return ESP_OK;
 }
 
-/**
- * @brief Disables capture channel for the right sensor.
- */
-void ThreeEyes_DisableRight(void)
+float threeeyes_convert_ticks_to_cm(uint32_t tof_ticks)
 {
-    ESP_LOGI(TAG, "Disabling capture channel for Right Sensor");
-    ESP_ERROR_CHECK(mcpwm_capture_channel_disable(sensors[2].channel));
+    if (s_timer_resolution_hz == 0)
+    {
+        return 0.0f;
+    }
+    const float tof_us = (float)tof_ticks * (1000000.0f / (float)s_timer_resolution_hz);
+    return tof_us / THREEEYES_US_PER_CM;
+}
+
+esp_err_t threeeyes_disable_left(void)
+{
+    return disable_sensor(THREEEYES_INDEX_LEFT);
+}
+
+esp_err_t threeeyes_disable_middle(void)
+{
+    return disable_sensor(THREEEYES_INDEX_MIDDLE);
+}
+
+esp_err_t threeeyes_disable_right(void)
+{
+    return disable_sensor(THREEEYES_INDEX_RIGHT);
 }

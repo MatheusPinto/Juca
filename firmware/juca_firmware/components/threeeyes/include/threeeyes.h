@@ -1,119 +1,153 @@
 /**
  * @file    threeeyes.h
- * @brief   Public interface for the ultrasonic sensor module (ThreeEyes / HC-SR04).
- * @details Declares GPIO macros, data structures, and API functions to initialize,
- *          trigger (TRIG), and read the time-of-flight (ToF) of three ultrasonic
- *          sensors in parallel using ESP32's MCPWM Capture peripheral.
+ * @brief   Public interface of the ThreeEyes component: three HC-SR04 ultrasonic sensors read in parallel.
  *
- * @date    2025
- * @author  Matheus
+ * @details The three sensors share ONE trigger pin, so they all fire at the same instant. Each echo pin
+ *          goes to its own MCPWM capture channel, which timestamps the rising and the falling edge of the
+ *          echo pulse in hardware. The width of that pulse is the time of flight (ToF) of the sound, there
+ *          and back.
+ *
+ *          The component is a singleton (one set of three sensors) and knows nothing about the board: the
+ *          pins and the MCPWM group arrive through @ref threeeyes_config_t.
+ *
+ * @note    Only one task may use the measurement functions: @ref threeeyes_trigger_and_wait uses the task
+ *          notification (index 0) of the calling task to wait for the echoes.
+ *
+ * @date    Nov 2026
+ * @author  Matheus Leitezke Pinto
  */
 
-#ifndef THREE_EYES_LIB
-#define THREE_EYES_LIB
+#pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+#include "esp_err.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/projdefs.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_private/esp_clk.h"
-#include "driver/mcpwm_cap.h"
-#include "driver/gpio.h"
-#include "esp_timer.h"
 #include "hal/gpio_types.h"
 
-/* ============================================================================
- *                            GPIO PIN MAPPING
- * ==========================================================================*/
-
-/** @brief GPIO pin used to output the trigger pulse (TRIG) common to all sensors. */
-#define HC_SR04_TRIG_GPIO         GPIO_NUM_42
-
-/** @brief GPIO pin for receiving the ECHO signal from the left sensor. */
-#define HC_SR04_ECHO_GPIO_LEFT    GPIO_NUM_5
-
-/** @brief GPIO pin for receiving the ECHO signal from the middle sensor. */
-#define HC_SR04_ECHO_GPIO_MIDDLE  GPIO_NUM_4
-
-/** @brief GPIO pin for receiving the ECHO signal from the right sensor. */
-#define HC_SR04_ECHO_GPIO_RIGHT   GPIO_NUM_1
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ============================================================================
- *                    FREERTOS TASK NOTIFICATION BITS
+ *                                 CONSTANTS
  * ==========================================================================*/
 
-/** @brief Task notification bit for the left sensor response (0x01). */
-#define NOTIFY_BIT_LEFT_SENSOR    ( 1UL << 0UL )
-
-/** @brief Task notification bit for the middle sensor response (0x02). */
-#define NOTIFY_BIT_MIDDLE_SENSOR  ( 1UL << 1UL )
-
-/** @brief Task notification bit for the right sensor response (0x04). */
-#define NOTIFY_BIT_RIGHT_SENSOR   ( 1UL << 2UL )
+/**
+ * @brief Round-trip time of sound per centimeter of distance, in microseconds.
+ *
+ * @details Sound travels at about 343 m/s (air, 20 degrees C), so 1 cm there and back (2 cm) takes
+ *          2 cm / 34300 cm/s = 58.3 us. The HC-SR04 datasheet rounds it to 58.
+ */
+#define THREEEYES_US_PER_CM    58.0f
 
 /* ============================================================================
  *                              DATA TYPES
  * ==========================================================================*/
 
 /**
- * @brief Structure holding the measurement result of an individual ultrasonic sensor.
+ * @brief Configuration of the three sensors. Every field is mandatory.
  */
 typedef struct {
-    uint32_t tof_ticks;    /**< Time-of-Flight measured in capture timer ticks. */
-    BaseType_t isUpdated;  /**< Indicates if the value was updated after the last trigger pulse (pdTRUE/pdFALSE). */
-} ultrasonic_value_t;
+    gpio_num_t trig_gpio;         /**< Output pin wired to the TRIG input of ALL three sensors. */
+    gpio_num_t echo_left_gpio;    /**< Input pin wired to the ECHO output of the left sensor. */
+    gpio_num_t echo_middle_gpio;  /**< Input pin wired to the ECHO output of the middle sensor. */
+    gpio_num_t echo_right_gpio;   /**< Input pin wired to the ECHO output of the right sensor. */
+    int mcpwm_group_id;           /**< MCPWM group that provides the capture timer (0 or 1 on the ESP32-S3). It may be the same group that drives the motors: the capture timer is independent of the PWM timers. */
+} threeeyes_config_t;
 
 /**
- * @brief Structure holding context and control information for an ultrasonic sensor.
+ * @brief Result of one sensor for the last trigger.
  */
 typedef struct {
-    mcpwm_cap_channel_handle_t channel; /**< MCPWM capture channel handle associated with the ECHO pin. */
-    gpio_num_t echo_gpio_num;            /**< GPIO pin number associated with this sensor's ECHO signal. */
-    uint32_t start_time;                 /**< Timestamp (ticks) of the ECHO rising edge. */
-    uint32_t notify_bit;                 /**< FreeRTOS task notification bit mask for this sensor. */
-    ultrasonic_value_t value;            /**< Most recent measurement data of the sensor. */
-} ultrasonic_sensor_t;
+    uint32_t tof_ticks;  /**< Width of the last echo pulse, in capture timer ticks. Convert with @ref threeeyes_convert_ticks_to_cm. Only meaningful when `is_updated` is true. */
+    bool is_updated;     /**< true if this sensor's echo ended before @ref threeeyes_trigger_and_wait returned. */
+} threeeyes_value_t;
 
 /* ============================================================================
  *                              PUBLIC API
  * ==========================================================================*/
 
 /**
- * @brief Initializes the ultrasonic sensor subsystem (TRIG pin and MCPWM Capture peripheral).
- * @details Configures the capture timer, enables 3 input channels (ECHO), and 
- *          registers edge capture ISR callback functions.
- */
-void ThreeEyes_Init( void );
-
-/**
- * @brief Emits the TRIG pulse and waits for ECHO responses from active sensors via task notifications.
+ * @brief Configures the trigger pin and the three MCPWM capture channels.
  *
- * @param[in] xTicksToWait Maximum wait time (timeout) in FreeRTOS ticks.
- */
-void ThreeEyes_TrigAndWait( TickType_t xTicksToWait );
-
-/**
- * @brief Reads the updated measurement values from all three sensors (left, middle, right).
+ * @details Creates the capture timer, one capture channel per echo pin (both edges), registers the edge
+ *          callback, configures the trigger pin as an output at low level and starts the timer. If any
+ *          step fails, everything created so far is released before returning.
  *
- * @param[out] left   Pointer to the structure where the left sensor data will be copied.
- * @param[out] middle Pointer to the structure where the middle sensor data will be copied.
- * @param[out] right  Pointer to the structure where the right sensor data will be copied.
+ * @param[in] config Pins and MCPWM group. Must not be NULL.
+ *
+ * @return esp_err_t
+ *         - ESP_OK: Sensors ready.
+ *         - ESP_ERR_INVALID_ARG: `config` is NULL.
+ *         - ESP_ERR_INVALID_STATE: Already initialized.
+ *         - Other: error of the MCPWM or GPIO driver (nothing is left allocated).
  */
-void ThreeEyes_Read( ultrasonic_value_t *left, ultrasonic_value_t *middle, ultrasonic_value_t *right);
+esp_err_t threeeyes_init(const threeeyes_config_t *config);
 
 /**
- * @brief Disables pulse capture on the left sensor channel.
+ * @brief Fires the three sensors and blocks the calling task until the FIRST echo ends, or the timeout expires.
+ *
+ * @details Sends a 10 us pulse on the trigger pin and waits. The function returns as soon as one sensor
+ *          finishes its echo: that is the sensor with the NEAREST object. Sensors whose echo is still in
+ *          flight at that moment are reported with `is_updated == false` by @ref threeeyes_read_values,
+ *          even if they do see an object farther away.
+ *
+ *          A sensor with nothing in range still answers, with a long echo of about 38 ms. So with at
+ *          least one sensor connected this function returns within about 38 ms.
+ *
+ * @param[in] timeout_ticks Longest wait, in RTOS ticks. Use at least 60 ms (the HC-SR04 measurement cycle).
+ *
+ * @return esp_err_t
+ *         - ESP_OK: At least one sensor answered.
+ *         - ESP_ERR_TIMEOUT: No echo arrived (sensors unplugged or unpowered). All `is_updated` flags are false.
+ *         - ESP_ERR_INVALID_STATE: @ref threeeyes_init was not called.
  */
-void ThreeEyes_DisableLeft(void);
+esp_err_t threeeyes_trigger_and_wait(TickType_t timeout_ticks);
 
 /**
- * @brief Disables pulse capture on the middle sensor channel.
+ * @brief Copies the result of the last trigger for the three sensors.
+ *
+ * @param[out] left   Result of the left sensor. Must not be NULL.
+ * @param[out] middle Result of the middle sensor. Must not be NULL.
+ * @param[out] right  Result of the right sensor. Must not be NULL.
+ *
+ * @return esp_err_t
+ *         - ESP_OK: Values copied.
+ *         - ESP_ERR_INVALID_ARG: A NULL pointer.
  */
-void ThreeEyes_DisableMiddle(void);
+esp_err_t threeeyes_read_values(threeeyes_value_t *left, threeeyes_value_t *middle, threeeyes_value_t *right);
 
 /**
- * @brief Disables pulse capture on the right sensor channel.
+ * @brief Converts an echo width from capture timer ticks to a distance in centimeters.
+ *
+ * @details distance_cm = (tof_ticks / timer_resolution_hz) * 1e6 / @ref THREEEYES_US_PER_CM.
+ *          On the ESP32-S3 the capture timer runs at 80 MHz, so one tick is 12.5 ns (0.0002 cm).
+ *          An echo of about 38 ms (about 650 cm) means "nothing in range", not an object at 6.5 m.
+ *
+ * @param[in] tof_ticks Echo width from @ref threeeyes_value_t.
+ * @return float Distance in centimeters, or 0.0f before @ref threeeyes_init.
  */
-void ThreeEyes_DisableRight(void);
+float threeeyes_convert_ticks_to_cm(uint32_t tof_ticks);
 
-#endif // THREE_EYES_LIB
+/**
+ * @brief Stops capturing the echo of the left sensor (it then never reports `is_updated`).
+ * @return esp_err_t ESP_OK, ESP_ERR_INVALID_STATE (not initialized or already disabled), or an MCPWM driver error.
+ */
+esp_err_t threeeyes_disable_left(void);
+
+/**
+ * @brief Stops capturing the echo of the middle sensor (it then never reports `is_updated`).
+ * @return esp_err_t ESP_OK, ESP_ERR_INVALID_STATE (not initialized or already disabled), or an MCPWM driver error.
+ */
+esp_err_t threeeyes_disable_middle(void);
+
+/**
+ * @brief Stops capturing the echo of the right sensor (it then never reports `is_updated`).
+ * @return esp_err_t ESP_OK, ESP_ERR_INVALID_STATE (not initialized or already disabled), or an MCPWM driver error.
+ */
+esp_err_t threeeyes_disable_right(void);
+
+#ifdef __cplusplus
+}
+#endif
