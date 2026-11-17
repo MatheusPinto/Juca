@@ -28,8 +28,8 @@
 //#define THREE_EYES_TASK
 //#define IMU_TASK
 //#define WHEEL_CTRL_TASK
-#define IR_LINE_TASK
-//#define DIFF_DRIVE_TASK
+//#define IR_LINE_TASK
+#define DIFF_DRIVE_TASK
 
 
 void app_main(void)

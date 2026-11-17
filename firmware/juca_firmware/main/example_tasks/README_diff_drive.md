@@ -195,11 +195,93 @@ diff_drive_task: [Odometry] Linear X: 0.187 m/s | Angular Z: 0.012 rad/s
 
 If the calibration fails (for example, a wheel did not turn), the task logs `Calibration skipped or failed (...)` and goes on with the estimates from the configuration and no trim. It still works, but the robot may drift to one side.
 
+## Speed PID (closed loop)
+
+The `diff_drive` component is open loop: it converts a speed into motor power and never checks the result. This example closes the loop **on top of** the component, in Part D2 of the main loop, with two small PID controllers: one for `linear_x` and one for `angular_z`.
+
+```mermaid
+flowchart LR
+    cmd["your command"] --> lim["limit to the<br/>reachable speed"]
+    lim -- "target" --> ramp["acceleration ramp<br/>(in this task)"]
+    ramp -- "reference" --> sum(("+"))
+    ramp -- "reference" --> err(("-"))
+    odo["diff_drive_get_twist()<br/>measured speed"] --> err
+    err -- "error" --> pid["PID"]
+    pid -- "correction" --> sum
+    sum -- "reference + correction" --> lib["diff_drive_set_twist()"]
+    lib --> robot["motors and wheels"]
+    robot --> odo
+```
+
+When a command arrives, it is first brought inside the speeds the wheels can reach (the **target**; see [Commands above the top speed](#commands-above-the-top-speed)). Then, every 50 ms, for each of the two axes:
+
+1. The **reference** moves towards the target, limited by the acceleration (0.5 m/s² and 1.5 rad/s²).
+2. The **error** is the reference minus the speed measured by the encoders.
+3. The PID turns the error into a **correction**, and the task sends `reference + correction` to the library.
+
+What changes compared with open loop:
+
+- **Low speeds work.** In open loop `0.2 0` did not move the wheels (dead zone of the motors). With the PID the integral part raises the command until the wheels turn and the measured speed reaches 0.2 m/s.
+- **The measured speed settles on the command,** instead of below it, as long as the command is within what the wheels can reach.
+- **Straight lines stay straight.** The angular controller corrects a left/right difference even when you ask for `angular_z = 0`.
+- **The ramp of the library is turned off** (`max_accel_*` set to 0) and done in this task instead. Two ramps in a row would delay the corrections and make the speed overshoot.
+- **The log has one more line per lap,** `[PID] Reference: ... | Sent: ...`. `Sent` above `Reference` means the PID is pushing harder to make up for a slow robot.
+- **At start-up the task prints the reachable speed,** after the calibration: `Speed PID on. Reachable: 0.62 m/s straight, 4.13 rad/s in place.` (the values come from your calibration).
+
+### Commands above the top speed
+
+The wheels cannot go faster than a limit. The faster wheel of a command turns at `|linear_x| + 0.15 * |angular_z|` m/s (0.15 is the half track width in meters), and the most it can do is
+
+```
+reachable = max_wheel_rad_s x 0.03 m x (JUCA_MOTOR_MAX_POWER_TICKS / 400)
+```
+
+where `max_wheel_rad_s` is the value of the calibration (or 20 rad/s, the estimate of the configuration, if the calibration failed). For example, 23.61 rad/s at 350 of 400 ticks gives 0.62 m/s.
+
+A command that asks for more is reduced **before** the ramp: both components are multiplied by the same factor, so the robot follows the same curve, more slowly. The task says so once, when the command arrives:
+
+```
+W (...) diff_drive_task: Command above what the wheels can reach: limited to 0.620 m/s, 0.000 rad/s.
+```
+
+So `1 0` and `50 0` give the same result: the reference stops at the limit and the robot runs at its top speed.
+
+Why it matters: without this step the reference would keep ramping up towards the impossible command (towards 50 m/s, at 0.5 m/s² per second), and after a `0 0` it would need as long to come back down. The robot would keep running at full speed for all that time (about 100 s for a `50 0` held long enough). The library limits what it sends to the motors, but it cannot see the reference of this PID, so the task limits it too.
+
+The measured speed can end slightly **above** the computed limit (3% to 9% in the open-loop tests): the calibration slightly underestimates the top speed. The PID then reduces its correction; nothing else changes.
+
+To compare, set `SPEED_PID_ENABLE` to 0 at the top of [`diff_drive_task.c`](diff_drive_task.c): the example goes back to open loop.
+
+### Tuning
+
+The gains are **starting values from a simple simulation of the motors. They were not tuned on the robot.** Test first with the wheels in the air.
+
+| Constant | Value | Effect of raising it |
+|---|---|---|
+| `SPEED_PID_LINEAR_KP`, `SPEED_PID_ANGULAR_KP` | 0.5 | Faster reaction; too high and the speed oscillates |
+| `SPEED_PID_LINEAR_KI`, `SPEED_PID_ANGULAR_KI` | 2.0 | Removes the steady error sooner; too high and the speed overshoots |
+| `SPEED_PID_LINEAR_KD`, `SPEED_PID_ANGULAR_KD` | 0.0 | Damps overshoot, but amplifies the noise of the encoder speed. Leave at 0 unless needed |
+| `SPEED_PID_LINEAR_LIMIT_M_S` | 0.4 | Largest correction, in m/s. Must cover the dead zone (about 0.2 m/s) |
+| `SPEED_PID_ANGULAR_LIMIT_RAD_S` | 2.5 | Largest correction, in rad/s. Must cover the dead zone (about 1.3 rad/s) |
+
+A simple procedure, one axis at a time (`0.3 0` for linear, `0 2` for angular):
+
+1. Set KI to 0 and raise KP until the speed starts to oscillate; use half of that value.
+2. Raise KI until the measured speed reaches the command in about one second without overshooting much.
+3. Check a low command (`0.2 0`), a high one (`0.7 0`) and a reversal (`0.3 0` then `-0.3 0`).
+
+Things to know:
+
+- **A command above the top speed is reduced to it** before it reaches the PID (see [Commands above the top speed](#commands-above-the-top-speed)). The robot then runs at its top speed, and stops as quickly as from any other speed.
+- **Very low speeds can be jerky** (start, overshoot, stop): the motors stick below the dead zone and the encoder speed is coarse at 20 Hz.
+- **The encoders must count up when the robot goes forward.** With one encoder inverted the correction has the wrong sign and that wheel runs away. If the `[Odometry]` signs were right in open loop, they are right here.
+- **A blocked wheel makes the PID push harder,** up to the correction limit. The overcurrent protection is still the only thing that stops the motors.
+
 ## How to read the results
 
 - **The speed does not jump.** The component limits the acceleration (0.5 m/s² linear, 1.5 rad/s² angular in this example), so `0.2 0` takes about 0.4 s to reach 0.2 m/s. The odometry shows that ramp.
-- **Measured is not always equal to commanded.** The control is **open loop**: the component converts your speed into motor power but does not correct it using the encoders. At low speeds the motors may barely turn (dead zone), and the result also changes with the battery charge and the floor. Compare the `[Odometry]` line with what you typed; this difference is the point of the exercise.
-- **Very large commands are scaled down.** The wheels cannot go faster than a limit, so a command outside it keeps its direction and curvature but is reduced to the edge of what is reachable. With the calibration above, the rule of thumb is `|linear_x| + 0.15 * |angular_z|` up to about 0.69 m/s (the 0.15 is the half track width in meters). Before or without a calibration the limit is lower, about 0.52 m/s. On top of that the example limits the commands to 0.8 m/s and 2.0 rad/s.
+- **Measured is not always equal to commanded** when `SPEED_PID_ENABLE` is 0. The control is then **open loop**: the component converts your speed into motor power but does not correct it using the encoders. At low speeds the motors may barely turn (dead zone), and the result also changes with the battery charge and the floor. Compare the `[Odometry]` line with what you typed; this difference is the point of the exercise.
+- **Very large commands are scaled down.** The wheels cannot go faster than a limit, so a command outside it keeps its direction and curvature but is reduced to the edge of what is reachable: `|linear_x| + 0.15 * |angular_z|` up to the reachable speed printed at start-up (the 0.15 is the half track width in meters). With the PID the task does this itself and logs it; in open loop the library does it, silently. The example sets no other speed limit (`max_linear_velocity_m_s` and `max_angular_velocity_rad_s` are 0).
 - **Going straight.** The calibration gives the faster wheel a trim factor below 1, so equal commands to both wheels should drive straight. A strong drift usually means the calibration failed or the floor was very different.
 
 ## If the robot stalls (overcurrent protection)
@@ -209,7 +291,7 @@ If the current of a wheel stays above the threshold (raw ADC value 3000, which i
 1. Brakes both wheels and discards the current target. The log shows `OVERCURRENT DETECTED! ... Emergency brake activated!`.
 2. Refuses new motion commands until the fault is cleared.
 
-To recover, free the robot and **type a new command**. The task clears the fault and applies that command (`Safety lock active! Cleared fault and re-issued target twist.`). Recovery attempts are at least 3 s apart, so the command can wait up to 3 s before being picked up.
+To recover, free the robot and **type a new command**. The task clears the fault and applies that command. With the PID the log shows `Safety lock active! Cleared fault and set a new target twist.` and the robot starts again from a stop, through the ramp; in open loop it shows `Safety lock active! Cleared fault and re-issued target twist.` Recovery attempts are at least 3 s apart, so the command can wait up to 3 s before being picked up.
 
 ## Parameters worth changing
 
@@ -217,10 +299,10 @@ All of them are in the `drive_config` structure of `diff_drive_ctrl_task()`.
 
 | Field | Value in the example | What it does |
 |---|---|---|
-| `max_linear_velocity_m_s` | 0.8 | Upper limit for `linear_x` (0 disables it) |
-| `max_angular_velocity_rad_s` | 2.0 | Upper limit for `angular_z` (0 disables it) |
-| `max_accel_linear_m_s2` | 0.5 | Linear acceleration ramp (0 or less disables it) |
-| `max_accel_angular_rad_s2` | 1.5 | Angular acceleration ramp (0 or less disables it) |
+| `max_linear_velocity_m_s` | 0 (off) | Upper limit for `linear_x` (0 disables it) |
+| `max_angular_velocity_rad_s` | 0 (off) | Upper limit for `angular_z` (0 disables it) |
+| `max_accel_linear_m_s2` | 0.5 (0 with the PID) | Linear acceleration ramp of the library (0 or less disables it). With the PID the ramp is `ACCEL_LINEAR_M_S2`, at the top of the file |
+| `max_accel_angular_rad_s2` | 1.5 (0 with the PID) | Angular acceleration ramp of the library. With the PID the ramp is `ACCEL_ANGULAR_RAD_S2` |
 | `max_adc_raw_threshold` | 3000 | Overcurrent threshold, in raw ADC counts (0 disables the protection) |
 | `control_period_ms` | 20 | Period of the library control task |
 | `monitor_period_ms` | 50 | Period of the library safety task |

@@ -17,12 +17,14 @@
  *    2. `init_usb_cdc_stdio()`    - makes `printf()` / `fgets()` work over the USB cable.
  *    3. `parse_twist_line()`      - turns the text "0.2 0.5" into two numbers.
  *    4. `console_input_task()`    - the task that reads what you type.
- *    5. `diff_drive_ctrl_task()`  - the main task. It has 5 steps:
+ *    5. The speed PID             - the small controller that makes the measured speed match the command.
+ *    6. `diff_drive_ctrl_task()`  - the main task. It has 5 steps:
  *         Step 1  create the ADC (the "current meter" of the motors),
  *         Step 2  create the two wheels (PWM, encoder, current sensor),
  *         Step 3  fill in the configuration of the differential drive and start it,
  *         Step 4  calibrate (the robot moves by itself for 4 seconds!),
- *         Step 5  the endless loop: read commands, recover from faults, print the odometry.
+ *         Step 5  the endless loop: read commands, recover from faults, read the odometry,
+ *                 run the speed PID and print the result.
  *
  * ============================================================================
  *  HOW TO RUN IT
@@ -66,6 +68,10 @@
  *  Notice that THIS file never sets a PWM value by hand. It only says "where do I want to go" (a velocity
  *  command, called a "twist") and "how fast did I really go" (odometry). The `diff_drive` component does the
  *  rest. That separation is the whole point of using a library.
+ *
+ *  The `diff_drive` component is OPEN LOOP: it turns a speed into motor power and never checks the result.
+ *  This file closes the loop on top of it (see "SPEED PID" below): every 50 ms it compares the speed you
+ *  asked for with the speed the encoders measured, and corrects the command it sends to the library.
  *
  * @date      Jan 2025 / Refactored
  * @author    Matheus
@@ -130,6 +136,172 @@ static const char *TAG = "diff_drive_task";
 
 /* Pins, ADC channels and the current conversion factor of the board: see juca_board.h.
  * Geometry, encoder resolution and motor power cap of the tested platform: see juca_platform.h. */
+
+/* ============================================================================
+ *                                 SPEED PID
+ * ==========================================================================*/
+
+/**
+ * @brief 1 = closed loop (the speed PID corrects the command), 0 = open loop (the command goes straight
+ *        to the library, as in the first version of this example).
+ *
+ * @details Run the same commands with 0 and with 1 and compare the `[Odometry]` lines: that difference is
+ *          what a feedback controller buys you.
+ */
+#define SPEED_PID_ENABLE              1
+
+/**
+ * @name Gains of the two controllers (one for `linear_x`, one for `angular_z`)
+ * @brief Starting values chosen with a simple simulation of the motors. They were NOT tuned on the robot.
+ *
+ * @details The controller output is a CORRECTION added to the command, in the same unit as the command.
+ *          - KP: correction per unit of error, right now. Higher reacts faster; too high oscillates.
+ *          - KI: correction per unit of error per second. It is what removes the steady error (for example
+ *            the dead zone of the motors); too high overshoots.
+ *          - KD: correction per unit of error change per second. 0 here: the encoder speed is noisy at
+ *            20 Hz and a derivative would amplify that noise.
+ * @{
+ */
+#define SPEED_PID_LINEAR_KP           0.5f    /**< (m/s) per (m/s). */
+#define SPEED_PID_LINEAR_KI           2.0f    /**< (m/s) per (m/s * s). */
+#define SPEED_PID_LINEAR_KD           0.0f    /**< (m/s) per (m/s / s). */
+#define SPEED_PID_ANGULAR_KP          0.5f    /**< (rad/s) per (rad/s). */
+#define SPEED_PID_ANGULAR_KI          2.0f    /**< (rad/s) per (rad/s * s). */
+#define SPEED_PID_ANGULAR_KD          0.0f    /**< (rad/s) per (rad/s / s). */
+/** @} */
+
+/** @brief Largest correction the linear controller may add to the command, in m/s (either sign). */
+#define SPEED_PID_LINEAR_LIMIT_M_S    0.4f
+/** @brief Largest correction the angular controller may add to the command, in rad/s (either sign). */
+#define SPEED_PID_ANGULAR_LIMIT_RAD_S 2.5f
+
+/** @brief Linear acceleration limit, in m/s^2: the speed changes by at most this much every second. */
+#define ACCEL_LINEAR_M_S2             0.5f
+/** @brief Angular acceleration limit, in rad/s^2. */
+#define ACCEL_ANGULAR_RAD_S2          1.5f
+
+#if SPEED_PID_ENABLE   /* The controller code below is only compiled when the PID is in use. */
+
+/**
+ * @brief State of one PID controller.
+ *
+ * @details The gains and the limit are set once; `integral` and `previous_error` are the memory of the
+ *          controller between two calls.
+ */
+typedef struct {
+    float kp;               /**< Proportional gain. */
+    float ki;               /**< Integral gain, per second. */
+    float kd;               /**< Derivative gain, times seconds. */
+    float output_limit;     /**< The output, and the integral part alone, stay within +/- this value. */
+    float integral;         /**< Accumulated integral part of the output (already multiplied by ki). */
+    float previous_error;   /**< Error of the previous call, for the derivative. */
+} speed_pid_t;
+
+/**
+ * @brief Forgets the past of a controller (used when the robot stops and after a fault).
+ *
+ * @param[in,out] pid Controller to reset.
+ */
+static void speed_pid_reset(speed_pid_t *pid)
+{
+    pid->integral = 0.0f;
+    pid->previous_error = 0.0f;
+}
+
+/**
+ * @brief One step of the PID: from the error to the correction.
+ *
+ * @details output = kp * error + integral + kd * (error - previous_error) / dt, where the integral grows
+ *          by ki * error * dt at every call.
+ *
+ *          The integral is limited to +/- `output_limit` ("anti-windup"): if the wheels cannot deliver
+ *          what is asked (a blocked wheel, a command above the top speed) the error never goes to zero,
+ *          and without the limit the integral would grow without end and take a long time to come back.
+ *
+ * @param[in,out] pid          Controller.
+ * @param[in]     error        Wanted value minus measured value.
+ * @param[in]     delta_time_s Time since the previous call, in seconds (> 0).
+ * @return float Correction to add to the command, within +/- `output_limit`.
+ */
+static float speed_pid_step(speed_pid_t *pid, float error, float delta_time_s)
+{
+    pid->integral += pid->ki * error * delta_time_s;
+    if (pid->integral > pid->output_limit)  { pid->integral = pid->output_limit; }
+    if (pid->integral < -pid->output_limit) { pid->integral = -pid->output_limit; }
+
+    float output = pid->kp * error + pid->integral + pid->kd * (error - pid->previous_error) / delta_time_s;
+    pid->previous_error = error;
+
+    if (output > pid->output_limit)  { output = pid->output_limit; }
+    if (output < -pid->output_limit) { output = -pid->output_limit; }
+    return output;
+}
+
+/**
+ * @brief Moves a value towards a target by at most `max_step` (the acceleration ramp of the reference).
+ *
+ * @param[in] current  Present value.
+ * @param[in] target   Value to reach.
+ * @param[in] max_step Largest change allowed in this call (>= 0).
+ * @return float New value.
+ */
+static float ramp_towards(float current, float target, float max_step)
+{
+    float delta = target - current;
+    if (delta > max_step)  { delta = max_step; }
+    if (delta < -max_step) { delta = -max_step; }
+    return current + delta;
+}
+
+/**
+ * @brief Brings a command inside the speeds the wheels can really reach, keeping its direction.
+ *
+ * @details The faster wheel of a twist (v, w) turns at |v| + |w| * L/2 (in m/s at the wheel surface).
+ *          The most a wheel can do is `max_wheel_rad_s * r * (duty cap / full duty)`. If the command asks
+ *          for more, BOTH components are multiplied by the same factor: same curve, lower speed. This is
+ *          the same rule the library applies inside (`scale_twist_to_wheel_limit` in diff_drive.c).
+ *
+ *          WHY HERE TOO: the library limits what it SENDS to the motors, but not the reference of this
+ *          PID. Without this step, a command of 50 m/s would make the reference ramp up to 50 m/s (it
+ *          only stops there), the error would stay large forever, and after a "0 0" the reference would
+ *          need 100 s (50 m/s at 0.5 m/s^2) to come back down: the robot would keep running at full
+ *          speed for all that time. This is the "wind-up" of the reference.
+ *
+ * @param[in,out] twist           Command to limit.
+ * @param[in]     usable_wheel_m_s Fastest speed a wheel surface can reach, in m/s (> 0).
+ * @return true if the command was reduced.
+ */
+static bool limit_to_reachable(diff_drive_twist_t *twist, float usable_wheel_m_s)
+{
+    const float demand_m_s = fabsf(twist->linear_x) + fabsf(twist->angular_z) * JUCA_HALF_TRACK_WIDTH_M;
+    if (demand_m_s <= usable_wheel_m_s)
+    {
+        return false;
+    }
+    const float scale = usable_wheel_m_s / demand_m_s;
+    twist->linear_x *= scale;
+    twist->angular_z *= scale;
+    return true;
+}
+
+/**
+ * @brief Turns a typed command into the target of the PID reference, and says so when it was reduced.
+ *
+ * @param[in]  command          Command as typed.
+ * @param[out] target           Command inside the reachable speeds.
+ * @param[in]  usable_wheel_m_s See @ref limit_to_reachable.
+ */
+static void set_pid_target(const diff_drive_twist_t *command, diff_drive_twist_t *target, float usable_wheel_m_s)
+{
+    *target = *command;
+    if (limit_to_reachable(target, usable_wheel_m_s))
+    {
+        ESP_LOGW(TAG, "Command above what the wheels can reach: limited to %.3f m/s, %.3f rad/s.",
+                 target->linear_x, target->angular_z);
+    }
+}
+
+#endif /* SPEED_PID_ENABLE */
 
 /* ============================================================================
  *                    COMMUNICATION AND CONSOLE GLOBALS
@@ -514,9 +686,18 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
 
         /* The speed is not allowed to jump: it changes by at most 0.5 m/s every second (linear) and
          * 1.5 rad/s every second (angular). Going from 0 to 0.4 m/s therefore takes 0.8 s, which protects
-         * the gearbox, the battery and the traction of the wheels. A value <= 0 would disable the ramp. */
-        .max_accel_linear_m_s2 = 0.5f,
-        .max_accel_angular_rad_s2 = 1.5f,
+         * the gearbox, the battery and the traction of the wheels. A value <= 0 would disable the ramp.
+         *
+         * With the speed PID this ramp is done HERE, in this task (on the reference the PID follows), so
+         * the ramp of the library is turned off: two ramps in a row would delay the corrections of the
+         * PID and make it overshoot. */
+#if SPEED_PID_ENABLE
+        .max_accel_linear_m_s2 = 0.0f,
+        .max_accel_angular_rad_s2 = 0.0f,
+#else
+        .max_accel_linear_m_s2 = ACCEL_LINEAR_M_S2,
+        .max_accel_angular_rad_s2 = ACCEL_ANGULAR_RAD_S2,
+#endif
 
         /* ---- The control task that lives inside the library ---- */
 
@@ -571,6 +752,33 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
     /* The command that is currently being executed. It starts at (0, 0) = stopped. */
     diff_drive_twist_t command_twist = {0};
 
+#if SPEED_PID_ENABLE
+    /* The two speed controllers, and the REFERENCE they follow: the command after the acceleration ramp.
+     * Following the ramped reference (instead of the raw command) keeps the error small while the robot
+     * accelerates, so the integral does not build up during the ramp. */
+    speed_pid_t linear_pid = {
+        .kp = SPEED_PID_LINEAR_KP, .ki = SPEED_PID_LINEAR_KI, .kd = SPEED_PID_LINEAR_KD,
+        .output_limit = SPEED_PID_LINEAR_LIMIT_M_S,
+    };
+    speed_pid_t angular_pid = {
+        .kp = SPEED_PID_ANGULAR_KP, .ki = SPEED_PID_ANGULAR_KI, .kd = SPEED_PID_ANGULAR_KD,
+        .output_limit = SPEED_PID_ANGULAR_LIMIT_RAD_S,
+    };
+    diff_drive_twist_t reference_twist = {0};
+
+    /* Fastest speed a wheel surface can reach, in m/s: the calibrated wheel speed at 100% duty (or the
+     * estimate of the configuration if the calibration failed) times the wheel radius, times the duty cap.
+     * Commands are brought inside it before the ramp (see limit_to_reachable). */
+    const float max_wheel_rad_s = (calibration_status == ESP_OK) ? measured_max_rad_s : drive_config.max_wheel_rad_s;
+    const float usable_wheel_m_s = max_wheel_rad_s * JUCA_WHEEL_RADIUS_M *
+                                   ((float)JUCA_MOTOR_MAX_POWER_TICKS / (float)WHEEL_PWM_DUTY_TICK_MAX);
+    ESP_LOGI(TAG, "Speed PID on. Reachable: %.2f m/s straight, %.2f rad/s in place.",
+             usable_wheel_m_s, usable_wheel_m_s / JUCA_HALF_TRACK_WIDTH_M);
+
+    /* The command after limit_to_reachable(): what the reference ramps towards. */
+    diff_drive_twist_t target_twist = {0};
+#endif
+
     /* Request first target command from user console.
      * `xTaskNotify(..., eNoAction)` only WAKES the console task (it carries no value). The console task
      * then prints its prompt and waits for you to type. */
@@ -583,8 +791,15 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
     /* Register the first command. IMPORTANT: `diff_drive_set_twist()` does NOT move the motors directly.
      * It only checks the values, applies the speed limits and stores the result as the new TARGET. The
      * library's control task then ramps towards that target and drives the PWM. This call returns
-     * immediately and is safe to call from any task. */
+     * immediately and is safe to call from any task.
+     *
+     * With the speed PID the command is not sent here: Part D of the loop sends the reference plus the
+     * correction, starting from zero. */
+#if SPEED_PID_ENABLE
+    set_pid_target(&command_twist, &target_twist, usable_wheel_m_s);
+#else
     ESP_ERROR_CHECK(diff_drive_set_twist(&command_twist));
+#endif
 
     ESP_LOGI(TAG, "First valid command applied (Linear=%.3f, Angular=%.3f). Restoring log verbosity.",
              command_twist.linear_x, command_twist.angular_z);
@@ -623,7 +838,7 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
      *   A. if a safety fault is latched: try to recover, then skip the rest of the lap;
      *   B. measure the real time elapsed since the previous lap (dt);
      *   C. check whether you typed a new command, and register it;
-     *   D. read the odometry and print it.
+     *   D. read the odometry and print it; then (D2) run the speed PID and send the corrected command.
      * `for ( ; ; )` is an endless loop, the same as `while (1)`. */
     for ( ; ; )
     {
@@ -654,6 +869,17 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
                     /* ...and register the command again. Clearing the fault does NOT resume the previous
                      * motion (the target was discarded when the fault latched, on purpose), so the new
                      * command is what makes the robot move again. */
+#if SPEED_PID_ENABLE
+                    /* With the PID the command is not sent to the library here (it has no ramp of its own
+                     * in this mode, so the robot would jump to the full command at once): it becomes the
+                     * new target, and Part D2 ramps the reference up from zero. The controllers forget
+                     * what they had accumulated while the wheel was blocked. */
+                    set_pid_target(&command_twist, &target_twist, usable_wheel_m_s);
+                    reference_twist = (diff_drive_twist_t){0};
+                    speed_pid_reset(&linear_pid);
+                    speed_pid_reset(&angular_pid);
+                    ESP_LOGW(TAG, "Safety lock active! Cleared fault and set a new target twist.");
+#else
                     esp_err_t resume_status = diff_drive_set_twist(&command_twist);
                     if (resume_status != ESP_OK)
                     {
@@ -664,6 +890,7 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
                     {
                         ESP_LOGW(TAG, "Safety lock active! Cleared fault and re-issued target twist.");
                     }
+#endif
 
                     /* Remember when this attempt happened, to enforce the cooldown. */
                     last_fault_retry_tick = now_tick;
@@ -701,14 +928,20 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
         diff_drive_twist_t new_command_from_console;
         if (xQueueReceive(s_command_queue, &new_command_from_console, 0) == pdTRUE)
         {
-            /* A new command arrived: keep a copy and give it to the library as the new target. */
+            /* A new command arrived: keep a copy. In open loop it is given to the library at once as the
+             * new target; with the speed PID, Part D sends it (ramped and corrected) on every lap. */
             command_twist = new_command_from_console;
+#if SPEED_PID_ENABLE
+            set_pid_target(&command_twist, &target_twist, usable_wheel_m_s);
+#endif
+#if !SPEED_PID_ENABLE
             esp_err_t set_twist_status = diff_drive_set_twist(&command_twist);
             if (set_twist_status != ESP_OK)
             {
                 /* The library can refuse a command (for example if a fault became active meanwhile). */
                 ESP_LOGW(TAG, "New command rejected: %s", esp_err_to_name(set_twist_status));
             }
+#endif
 
             /* Ask for the next command */
             xTaskNotify(console_input_task_handle, 0, eNoAction);
@@ -733,6 +966,49 @@ portTASK_FUNCTION(diff_drive_ctrl_task, arg)
                  * `diff_drive_get_current_ma(&left_ma, &right_ma)` here. */
                 ESP_LOGI(TAG, "[Odometry] Linear X: %.3f m/s | Angular Z: %.3f rad/s",
                          estimated_twist.linear_x, estimated_twist.angular_z);
+
+#if SPEED_PID_ENABLE
+                /* ---- Part D2. Speed PID: correct the command with what was just measured ---- */
+
+                /* 1. The reference moves towards your command (already brought inside the reachable speeds),
+                 *    limited by the acceleration. */
+                reference_twist.linear_x = ramp_towards(reference_twist.linear_x, target_twist.linear_x,
+                                                        ACCEL_LINEAR_M_S2 * delta_time_s);
+                reference_twist.angular_z = ramp_towards(reference_twist.angular_z, target_twist.angular_z,
+                                                         ACCEL_ANGULAR_RAD_S2 * delta_time_s);
+
+                diff_drive_twist_t output_twist = {0};
+                if (reference_twist.linear_x == 0.0f && reference_twist.angular_z == 0.0f)
+                {
+                    /* 2a. Asked to stand still: send exactly zero (the library brakes the wheels) and clear
+                     *     the controllers, so encoder noise at rest cannot slowly wind them up. */
+                    speed_pid_reset(&linear_pid);
+                    speed_pid_reset(&angular_pid);
+                }
+                else
+                {
+                    /* 2b. error = wanted - measured. What is sent is the reference (what open loop would
+                     *     send) PLUS the correction of each controller. */
+                    output_twist.linear_x = reference_twist.linear_x +
+                        speed_pid_step(&linear_pid, reference_twist.linear_x - estimated_twist.linear_x, delta_time_s);
+                    output_twist.angular_z = reference_twist.angular_z +
+                        speed_pid_step(&angular_pid, reference_twist.angular_z - estimated_twist.angular_z, delta_time_s);
+                }
+
+                /* 3. Give the corrected command to the library. It can refuse it if a fault latched just
+                 *    now; the next lap handles the fault in Part A. */
+                esp_err_t set_twist_status = diff_drive_set_twist(&output_twist);
+                if (set_twist_status != ESP_OK && !diff_drive_is_fault_active())
+                {
+                    ESP_LOGW(TAG, "Command rejected: %s", esp_err_to_name(set_twist_status));
+                }
+
+                /* Reference = what the robot should be doing now; Sent = what the PID asked the library for.
+                 * Sent above Reference means the PID is pushing harder to make up for a slow robot. */
+                ESP_LOGI(TAG, "[PID] Reference: %.3f m/s %.3f rad/s | Sent: %.3f m/s %.3f rad/s",
+                         reference_twist.linear_x, reference_twist.angular_z,
+                         output_twist.linear_x, output_twist.angular_z);
+#endif
             }
         }
 
