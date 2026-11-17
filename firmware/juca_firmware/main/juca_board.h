@@ -11,15 +11,14 @@
  *          The parameters that depend on the motors, encoders, wheels and chassis fitted to the
  *          board (geometry, encoder resolution, motor power cap) are in @ref juca_platform.h.
  *
- *          Currently covers the motor driver, the encoder inputs, the current sensors, the IMU I2C bus
- *          and the HC-SR04 ultrasonic sensors. Still outside this file (it migrates together with its
- *          component): IR line follower (ir_line.h).
+ *          Covers the motor driver, the encoder inputs, the current sensors, the IMU I2C bus, the
+ *          HC-SR04 ultrasonic sensors and the infrared line sensors.
  *
  * @note    Components under components/ must NOT include this header (it would invert
  *          the dependency direction). They receive pins and constants through a configuration
  *          struct, as the wheel and diff_drive components do.
  *
- * @date    Nov 2026
+ * @date    Oct 2026
  * @author  Matheus Leitezke Pinto
  */
 
@@ -96,3 +95,24 @@
 #define JUCA_PIN_HCSR04_ECHO_RIGHT      GPIO_NUM_1
 /** @brief MCPWM group whose capture timer measures the echoes (the motors use the PWM timers of the same group). */
 #define JUCA_MCPWM_GROUP_HCSR04         0
+
+/* ============================================================================
+ *                          INFRARED LINE SENSORS (5 digital sensors, left to right)
+ * ==========================================================================*/
+
+/** @brief Far left line sensor (seen from the robot, looking forward). */
+#define JUCA_PIN_IR_LINE_FAR_LEFT       GPIO_NUM_15
+/** @brief Center-left line sensor. */
+#define JUCA_PIN_IR_LINE_LEFT           GPIO_NUM_16
+/** @brief Middle line sensor. */
+#define JUCA_PIN_IR_LINE_MIDDLE         GPIO_NUM_17
+/** @brief Center-right line sensor. */
+#define JUCA_PIN_IR_LINE_RIGHT          GPIO_NUM_18
+/** @brief Far right line sensor. */
+#define JUCA_PIN_IR_LINE_FAR_RIGHT      GPIO_NUM_8
+/**
+ * @brief Level (0 or 1) that a line sensor outputs when it is over the line.
+ * @note  0 is for the tested track: a black line on a light floor. Use 1 if your sensors, or a
+ *        light line on a dark floor, give the opposite.
+ */
+#define JUCA_IR_LINE_LEVEL_ON_LINE      0

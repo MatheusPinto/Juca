@@ -1,77 +1,92 @@
-#include <stdio.h>
+/**
+ * @file    ir_line_task.c
+ * @brief   Example: read the 5 infrared line sensors and print where the line is.
+ *
+ * @details Twice per second the task reads the sensor bar and prints which sensors see the line and
+ *          the name of the pattern. Nothing moves: slide the robot by hand over the line and watch
+ *          the log. See README_ir_line.md in this folder.
+ *
+ * @date    Nov 2026
+ * @author  Matheus Leitezke Pinto
+ */
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
 #include "esp_log.h"
-#include "sdkconfig.h"
-#include "soc/gpio_reg.h"
 #include "ir_line.h"
+#include "ir_line_task.h"
+#include "juca_board.h"
 
-static const char *TAG = "IR_Line";
+/** @brief Logging tag used across ESP-IDF system log macros. */
+static const char *TAG = "ir_line_task";
 
-portTASK_FUNCTION(ir_line_follow, arg)
+/** @brief Time between two readings. */
+#define READ_PERIOD_MS    500
+
+/**
+ * @brief Gives a name to a sensor mask.
+ *
+ * @param[in] mask Mask from @ref ir_line_read_mask.
+ * @return Name of the pattern, or "other" for a combination that a single line does not produce
+ *         (sensors that are not neighbours, or three or four sensors at once).
+ */
+static const char *pattern_name(uint8_t mask)
 {
-	gpio_config_t ir_line_config = {
-			.pin_bit_mask = INFRA_RED_GPIO_PINS_MASK,
-			.mode = GPIO_MODE_INPUT,
-			.pull_down_en = GPIO_PULLDOWN_DISABLE,
-			.pull_up_en = GPIO_PULLUP_DISABLE,
-			.intr_type = GPIO_INTR_DISABLE
-	};
+    switch (mask)
+    {
+    case IR_LINE_PATTERN_NONE:            return "no line";
+    case IR_LINE_PATTERN_FAR_LEFT:        return "far left";
+    case IR_LINE_PATTERN_LEFT_FAR_LEFT:   return "left / far left";
+    case IR_LINE_PATTERN_LEFT:            return "left";
+    case IR_LINE_PATTERN_LEFT_MIDDLE:     return "left / middle";
+    case IR_LINE_PATTERN_MIDDLE:          return "middle";
+    case IR_LINE_PATTERN_RIGHT_MIDDLE:    return "middle / right";
+    case IR_LINE_PATTERN_RIGHT:           return "right";
+    case IR_LINE_PATTERN_RIGHT_FAR_RIGHT: return "right / far right";
+    case IR_LINE_PATTERN_FAR_RIGHT:       return "far right";
+    case IR_LINE_PATTERN_ALL:             return "all sensors";
+    default:                              return "other";
+    }
+}
 
-	gpio_config( &ir_line_config );
+portTASK_FUNCTION(ir_line_task, arg)
+{
+    (void)arg;
 
-	uint64_t gpioValue;
+    /* Pins and polarity come from the board header; the component itself knows no pin. */
+    const ir_line_config_t config = {
+        .sensor_gpios = {
+            JUCA_PIN_IR_LINE_FAR_LEFT,
+            JUCA_PIN_IR_LINE_LEFT,
+            JUCA_PIN_IR_LINE_MIDDLE,
+            JUCA_PIN_IR_LINE_RIGHT,
+            JUCA_PIN_IR_LINE_FAR_RIGHT,
+        },
+        .line_level = ! JUCA_IR_LINE_LEVEL_ON_LINE,
+    };
+    esp_err_t init_status = ir_line_init(&config);
+    if (init_status != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize the line sensors: %s", esp_err_to_name(init_status));
+        vTaskDelete(NULL);
+        return;
+    }
 
-	while (1) {
-		gpioValue = (uint64_t)gpio_get_level(INFRA_RED_LEFT_GPIO) << INFRA_RED_LEFT_GPIO |
-				    (uint64_t)gpio_get_level(INFRA_RED_CENTER_LEFT_GPIO) << INFRA_RED_CENTER_LEFT_GPIO|
-				    (uint64_t)gpio_get_level(INFRA_RED_MIDDLE_GPIO) << INFRA_RED_MIDDLE_GPIO|
-				    (uint64_t)gpio_get_level(INFRA_RED_CENTER_RIGHT_GPIO) << INFRA_RED_CENTER_RIGHT_GPIO|
-				    (uint64_t)gpio_get_level(INFRA_RED_RIGHT_GPIO) << INFRA_RED_RIGHT_GPIO;
+    for ( ; ; )
+    {
+        uint8_t mask = 0;
+        ir_line_read_mask(&mask);
 
-		#ifdef IR_LINE_IS_BLACK
-		gpioValue = gpioValue | INFRA_RED_OUT_GPIO_MASK;
-		#else
-		gpioValue = gpioValue & INFRA_RED_OUT_GPIO_MASK;
-		#endif
+        /* Draw the bar as the robot sees it: far left sensor first, '#' = over the line. */
+        char bar[IR_LINE_SENSOR_COUNT + 1];
+        for (int i = 0; i < IR_LINE_SENSOR_COUNT; i++)
+        {
+            bar[i] = (mask & (1U << i)) ? '#' : '.';
+        }
+        bar[IR_LINE_SENSOR_COUNT] = '\0';
 
-        //ESP_LOGI(TAG, "gpio value: %llu", gpioValue);
-		//ESP_LOGI(TAG, "gpio_value: %x", gpioValue);
-		//gpioValue = (REG_READ(GPIO_IN_REG) & INFRA_RED_OUT_GPIO_MASK);
-		switch(gpioValue)
-		{
-		case IR_LINE_VERY_VERY_LEFT:
-			ESP_LOGI(TAG, "GPIO VERY VERY LEFT!");
-			break;
-		case IR_LINE_VERY_LEFT:
-			ESP_LOGI(TAG, "GPIO VERY LEFT!");
-			break;
-		case IR_LINE_LEFT:
-			ESP_LOGI(TAG, "GPIO LEFT!");
-			break;
-		case IR_LINE_LEFT_MIDDLE:
-			ESP_LOGI(TAG, "GPIO LEFT MIDDLE!");
-			break;
-		case IR_LINE_MIDDLE:
-			ESP_LOGI(TAG, "GPIO MIDDLE!");
-			break;
-		case IR_LINE_RIGHT_MIDDLE:
-			ESP_LOGI(TAG, "GPIO RIGHT MIDDLE!");
-			break;
-		case IR_LINE_RIGHT:
-			ESP_LOGI(TAG, "GPIO RIGHT!");
-			break;
-		case IR_LINE_VERY_RIGHT:
-			ESP_LOGI(TAG, "GPIO VERY RIGHT!");
-			break;
-		case IR_LINE_VERY_VERY_RIGHT:
-			ESP_LOGI(TAG, "GPIO VERY VERY RIGHT!");
-			break;
-		default:
-			ESP_LOGI(TAG, "NOTHING!");
-			break;
-		}
-        vTaskDelay( 500 / portTICK_PERIOD_MS);
+        ESP_LOGI(TAG, "[%s] %s", bar, pattern_name(mask));
+
+        vTaskDelay(pdMS_TO_TICKS(READ_PERIOD_MS));
     }
 }

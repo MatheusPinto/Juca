@@ -80,6 +80,9 @@ Desktop.ini
 .vscode/settings.json
 .vscode/launch.json
 
+main/example_tasks/line_avoid_task.c
+main/example_tasks/line_avoid_task.h
+
 .cache/
 
 dependencies.lock
