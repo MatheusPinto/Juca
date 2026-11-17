@@ -1,0 +1,51 @@
+#######################################
+# Syntax coloring map for the Juca library
+#######################################
+
+# Datatypes (KEYWORD1)
+Juca	KEYWORD1
+JucaRobot	KEYWORD1
+JucaSonarSide	KEYWORD1
+diff_drive_config_t	KEYWORD1
+diff_drive_twist_t	KEYWORD1
+wheel_handle_t	KEYWORD1
+mpu6050_quaternion_t	KEYWORD1
+
+# Methods and functions (KEYWORD2)
+beginWheels	KEYWORD2
+leftWheel	KEYWORD2
+rightWheel	KEYWORD2
+defaultDriveConfig	KEYWORD2
+beginDrive	KEYWORD2
+calibrate	KEYWORD2
+setTwist	KEYWORD2
+getTwist	KEYWORD2
+brake	KEYWORD2
+faultActive	KEYWORD2
+clearFault	KEYWORD2
+getCurrentMilliamps	KEYWORD2
+beginSonar	KEYWORD2
+readSonarCm	KEYWORD2
+beginLine	KEYWORD2
+readLineMask	KEYWORD2
+readLinePosition	KEYWORD2
+beginImu	KEYWORD2
+readQuaternion	KEYWORD2
+lastError	KEYWORD2
+wheel_set_power	KEYWORD2
+wheel_brake	KEYWORD2
+wheel_get_encoder_count	KEYWORD2
+wheel_get_current_raw	KEYWORD2
+diff_drive_set_twist	KEYWORD2
+diff_drive_get_twist	KEYWORD2
+
+# Constants (LITERAL1)
+JUCA_SONAR_NONE	LITERAL1
+JUCA_SONAR_LEFT	LITERAL1
+JUCA_SONAR_MIDDLE	LITERAL1
+JUCA_SONAR_RIGHT	LITERAL1
+JUCA_SONAR_NOTHING_CM	LITERAL1
+JUCA_SONAR_MAX_CM	LITERAL1
+IR_LINE_PATTERN_NONE	LITERAL1
+IR_LINE_PATTERN_MIDDLE	LITERAL1
+IR_LINE_PATTERN_ALL	LITERAL1
