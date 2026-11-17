@@ -28,6 +28,22 @@ static const char *TAG = "MPU6050";
 /** @brief Default I2C transaction timeout in milliseconds. */
 #define MPU6050_I2C_TIMEOUT_MS 1000
 
+/**
+ * @brief How many times one calibration pass may start over when the readings are still far from zero.
+ *
+ * @details A pass is 100 correction steps. If the error is still large at the end (the sensor is moving,
+ * or an axis is saturated) the pass starts again. Without a limit it would repeat forever.
+ */
+#define MPU6050_CALIB_MAX_RESTARTS 20
+
+/**
+ * @brief Longest wait for a DMP packet to be complete in the FIFO, in RTOS ticks.
+ *
+ * @details The DMP interrupt flag is raised when a packet is written, so the 42 bytes are normally
+ * there already. The wait only covers a read that lands in the middle of that write.
+ */
+#define MPU6050_FIFO_WAIT_MAX_TICKS 10
+
 /* ============================================================================
  *                     PRIVATE HELPER FUNCTIONS
  * ==========================================================================*/
@@ -50,7 +66,7 @@ static esp_err_t mpu6050_write_registers(i2c_port_t i2c_num, uint8_t reg,
   i2c_master_write_byte(cmd, reg, 1);
   i2c_master_write(cmd, (uint8_t *)data, len, 1);
   i2c_master_stop(cmd);
-  esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, pdMS_TO_TICKS(1000));
+  esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, pdMS_TO_TICKS(MPU6050_I2C_TIMEOUT_MS));
   i2c_cmd_link_delete(cmd);
   return ret;
 }
@@ -204,6 +220,7 @@ static esp_err_t mpu6050_calibrate_pid(i2c_port_t i2c_num, uint8_t read_address,
 
   for (uint8_t l = 0; l < loops; l++) {
     int16_t e_sample = 0;
+    int restarts = 0;
 
     for (int c = 0; c < 100; c++) {
       float e_sum = 0.0f;
@@ -241,6 +258,11 @@ static esp_err_t mpu6050_calibrate_pid(i2c_port_t i2c_num, uint8_t read_address,
       }
 
       if ((c == 99) && (e_sum > 1000.0f)) {
+        /* Still far from zero after 100 steps: start the pass again, a limited number of times. */
+        if (++restarts > MPU6050_CALIB_MAX_RESTARTS) {
+          ESP_LOGE(TAG, "Calibration did not converge: is the sensor moving?");
+          return ESP_ERR_TIMEOUT;
+        }
         c = 0;
       }
 
@@ -253,6 +275,8 @@ static esp_err_t mpu6050_calibrate_pid(i2c_port_t i2c_num, uint8_t read_address,
         break;
       }
 
+      /* 1 ms is less than one RTOS tick (10 ms at 100 Hz), so this is 0 ticks: it only lets other
+       * tasks of the same priority run. The I2C transactions above already take about 3 ms per step. */
       vTaskDelay(pdMS_TO_TICKS(1));
     }
 
@@ -721,7 +745,8 @@ esp_err_t mpu6050_dmp_enable(i2c_port_t i2c_num, bool enabled) {
  * @param[out] fifo_packet Output buffer sized to at least @ref
  * MPU6050_DMP_PACKET_SIZE bytes.
  * @return esp_err_t ESP_OK on success, ESP_ERR_INVALID_STATE on FIFO overflow,
- *                   ESP_ERR_NOT_FOUND if packet not ready, or an I2C error.
+ *                   ESP_ERR_NOT_FOUND if packet not ready, ESP_ERR_TIMEOUT if a
+ *                   started packet did not complete, or an I2C error.
  */
 static esp_err_t mpu6050_dmp_read_fifo_packet(i2c_port_t i2c_num,
                                               uint8_t *fifo_packet) {
@@ -752,14 +777,19 @@ static esp_err_t mpu6050_dmp_read_fifo_packet(i2c_port_t i2c_num,
     return ESP_ERR_NOT_FOUND;
   }
 
-  while (fifo_count < MPU6050_DMP_PACKET_SIZE) {
+  /* The packet is normally complete already. If the read landed in the middle of a write, wait one
+   * RTOS tick at a time, with a limit, so a FIFO that never fills cannot block the caller forever. */
+  for (int waited_ticks = 0; fifo_count < MPU6050_DMP_PACKET_SIZE; waited_ticks++) {
+    if (waited_ticks >= MPU6050_FIFO_WAIT_MAX_TICKS) {
+      return ESP_ERR_TIMEOUT;
+    }
+    vTaskDelay(1);
     ret = mpu6050_read_registers(i2c_num, MPU6050_REG_FIFO_COUNTH,
                                  fifo_count_buffer, 2);
     if (ret != ESP_OK) {
       return ret;
     }
     fifo_count = ((uint16_t)fifo_count_buffer[0] << 8) | fifo_count_buffer[1];
-    vTaskDelay(pdMS_TO_TICKS(1));
   }
 
   ret = mpu6050_read_registers(i2c_num, MPU6050_REG_FIFO_R_W, fifo_packet,

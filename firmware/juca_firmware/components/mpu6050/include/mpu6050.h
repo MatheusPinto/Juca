@@ -239,9 +239,16 @@ esp_err_t mpu6050_dmp_enable(i2c_port_t i2c_num, bool enabled);
  *
  * @param[in]  i2c_num I2C port.
  * @param[out] q       Output quaternion.
- * @return ESP_OK on success; an error if a full packet
- *         (@ref MPU6050_DMP_PACKET_SIZE bytes) is not available or on I2C
- * failure.
+ * @return
+ *         - ESP_OK: A new quaternion was read.
+ *         - ESP_ERR_NOT_FOUND: No new packet since the previous call. This is
+ *           NORMAL when you poll faster than the DMP produces packets: just
+ *           try again later.
+ *         - ESP_ERR_INVALID_STATE: The FIFO overflowed (you polled too slowly).
+ *           It was reset; the next packets are fresh.
+ *         - ESP_ERR_TIMEOUT: A started packet did not complete in time.
+ *         - ESP_ERR_INVALID_ARG: @p q is NULL.
+ *         - Other: I2C error.
  */
 esp_err_t mpu6050_dmp_read_quaternion(i2c_port_t i2c_num,
                                       mpu6050_quaternion_t *q);
@@ -259,7 +266,9 @@ esp_err_t mpu6050_dmp_read_quaternion(i2c_port_t i2c_num,
  * @param[in] i2c_num I2C port.
  * @param[in] loops   Number of tuning iterations (more = more accurate but
  * slower).
- * @return ESP_OK on success, or an error code.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if @p loops is 0,
+ *         ESP_ERR_TIMEOUT if the readings never settled (sensor moving), or
+ *         an I2C error.
  */
 esp_err_t mpu6050_calibrate_gyro(i2c_port_t i2c_num, uint8_t loops);
 
@@ -270,7 +279,9 @@ esp_err_t mpu6050_calibrate_gyro(i2c_port_t i2c_num, uint8_t loops);
  *
  * @param[in] i2c_num I2C port.
  * @param[in] loops   Number of tuning iterations.
- * @return ESP_OK on success, or an error code.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if @p loops is 0,
+ *         ESP_ERR_TIMEOUT if the readings never settled (sensor moving or
+ *         not level), or an I2C error.
  */
 esp_err_t mpu6050_calibrate_accel(i2c_port_t i2c_num, uint8_t loops);
 
